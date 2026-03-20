@@ -1,6 +1,69 @@
-# Exclude the following from the Git repository
+# Configuration files (contain sensitive data)
+config.yml
+channels.yml
+.env
+
+# Session files (contain authentication data)
+*.session
+data/sessions/
+
+# Log files
+data/*.log
+
+# Database files
+data/*.db
+
+# Generated podcast audio
+podcasts/*.wav
+podcasts/*/*.wav
+podcasts/.segments_*/
+
+# Podcast audio assets (downloaded per-user, not source code)
+podcasts/assets/
+
+# Playwright MCP cache
+.playwright-mcp/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Legacy
 /old_files
-/__pycache__
-.dockerignore
-src/config.yml
-src/*.session
+/src/

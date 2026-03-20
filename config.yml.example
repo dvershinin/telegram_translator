@@ -1,0 +1,124 @@
+# Telegram Translator Configuration
+# Copy this file to config.yml and fill in your values
+# You can also use environment variables: TTR_API_ID and TTR_API_HASH
+
+# Telegram API credentials
+# Get these from https://core.telegram.org/api
+api_id: ${TTR_API_ID}  # or your actual API ID
+api_hash: ${TTR_API_HASH}  # or your actual API hash
+
+# Session configuration
+# The session file will be stored in the data/ directory
+session_name: "telegram_translator_session"
+
+# Optional: Custom session storage directory
+# session_storage_dir: "./data/sessions"
+
+# Translation settings
+translation:
+  provider: "openai"  # "openai" or "idioma"
+  
+  # OpenAI settings (when provider is "openai")
+  openai:
+    api_key: ${OPENAI_API_KEY}  # or your actual OpenAI API key
+    model: "gpt-4o-mini"  # "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"
+    max_tokens: 1000
+    temperature: 0.3
+    system_prompt: |
+      You are a professional translator specializing in Russian and Ukrainian to English translation.
+      Your task is to translate messages accurately while preserving the original meaning and tone.
+      For war-related content, maintain sensitivity and accuracy.
+      Always respond with only the translated text, nothing else.
+    
+  # Idioma settings (when provider is "idioma")
+  idioma:
+    source_language: "auto"  # auto-detect source language
+    target_language: "en"    # translate to English
+
+# Logging configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "[%(levelname)s %(asctime)s] %(name)s: %(message)s"
+  file: "./data/telegram_translator.log"
+
+# Message processing settings
+processing:
+  max_message_length: 3980  # Telegram message limit
+  max_video_message_length: 1024  # Video message limit
+  enable_link_preview: false
+  parse_mode: "html"
+
+# Channel filtering (optional)
+# Channels to exclude from processing
+excluded_channels:
+  - "photo_posts"
+  - "shadedPineapple"
+  - "my_search_results"
+  - "video_posts"
+  - "ukr_rus_war_news"
+  - "cyberbenb"
+  - "Telegram"
+
+# Advanced settings (optional)
+advanced:
+  retry_attempts: 3
+  retry_delay: 5  # seconds
+  connection_timeout: 30  # seconds
+  auto_reconnect: true
+
+# --- Digest Pipeline ---
+
+# Global content source pool (shared across podcasts)
+sources:
+  telegram:
+    naebnet:
+      prompt: "Focus on military and political updates about Russia/Ukraine"
+
+  web:
+    lenta:
+      url: "https://lenta.ru/rss"
+      language: "ru"
+      prompt: "Focus on major Russian domestic and foreign policy news"
+      max_articles: 20
+    cnn:
+      url: "http://rss.cnn.com/rss/edition_world.rss"
+      language: "en"
+      prompt: "Focus on major world events and geopolitical shifts"
+      max_articles: 15
+
+# Shared Voicebox connection
+voicebox:
+  url: "http://localhost:17493"
+
+# Named podcasts — each with its own identity, sources, voice, and prompts
+podcasts:
+  daily_briefing:
+    title: "The Daily Briefing"
+    host_name: "Angela"
+    sources: [naebnet, lenta, cnn]          # references global source names
+    selection_prompt: "Select articles about geopolitics, military, and economics"
+    voice_profile: "angiebunny27"
+    language: "en"
+    model: "gpt-4o"
+    executive_prompt: |
+      You are a professional news analyst creating a daily executive briefing.
+      Synthesize the source summaries into a cohesive overview of today's most
+      important developments. Focus on what changed, what matters, and what
+      to watch next.
+    podcast_prompt: |
+      You are {host_name}, host of {title}. Today is {date}.
+      Convert this executive summary into a natural monologue script for your
+      daily news podcast. Write as if speaking to the listener directly.
+      Use smooth transitions between topics. Open with a greeting and date,
+      close with a brief sign-off. Target ~1500 words (roughly 10 minutes).
+    audio:
+      intro_bed: "./podcasts/assets/news_bed.wav"
+      background_bed: "./podcasts/assets/background_bed.mp3"
+      whoosh: "./podcasts/assets/whoosh.wav"
+      lead_in_seconds: 4.0
+      intro_fade_seconds: 2.0
+      intro_bed_volume: 0.7
+      background_bed_volume: 0.08
+      background_fade_seconds: 3.0
+    output_dir: "./podcasts/daily_briefing"
+    pause_between_segments_ms: 800

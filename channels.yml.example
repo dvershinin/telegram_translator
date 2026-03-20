@@ -1,0 +1,70 @@
+# Channel Configuration for Telegram Translator
+# Copy this file to channels.yml and configure your channels
+
+# Channel pairs define input channels and their corresponding output channel
+# Each pair can have its own settings for media types, translation, and output channel
+# Use channel usernames (without the @ symbol)
+
+channel_pairs:
+  # Live monitoring: naebnet -> TestGetPageSpeed
+  naebnet_monitor:
+    input_channels:
+      - "naebnet"
+    output_channel: "TestGetPageSpeed"
+    description: "Monitor naebnet channel and translate to TestGetPageSpeed"
+    media_types: ["text", "photo", "video"]
+    translation: true
+    persistence: true  # Enable message persistence to avoid duplicates
+    content_filter_prompt: |
+      Only process messages that contain:
+      - News about Russia, Ukraine, or international relations
+      - Military or political developments
+      - Important announcements or breaking news
+      - Skip: advertisements, personal posts, spam, or irrelevant content
+      
+  # Example additional pairs (commented out)
+  # war_news:
+  #   input_channels:
+  #     - "ukraine_now"
+  #     - "russian_news"
+  #   output_channel: "my_war_news_channel"
+  #   description: "Main war news aggregation"
+  #   media_types: ["text", "photo", "video"]
+  #   translation: true
+  #   persistence: true
+  #   content_filter_prompt: |
+  #     Only process messages that contain:
+  #     - War-related news and updates
+  #     - Military developments and analysis
+  #     - Humanitarian or political developments
+  #     - Skip: entertainment, sports, or unrelated content
+
+# Channel metadata (optional)
+# You can add descriptions for your channels here
+channel_metadata:
+  naebnet: "Russian news and updates channel"
+  TestGetPageSpeed: "Test output channel for translated content"
+  
+# How to configure channels:
+# 1. Find the channel's username (the part after @ in the channel URL)
+# 2. Add it to the input_channels list (without the @ symbol)
+# 3. Example: For channel @naebnet, use "naebnet"
+#
+# Configuration options for each channel pair:
+# - input_channels: List of input channel usernames to monitor
+# - output_channel: Single output channel username where messages will be sent
+# - description: Human-readable description of the channel pair
+# - media_types: List of media types to process ("text", "photo", "video")
+# - translation: Whether to translate messages (true/false)
+# - persistence: Whether to track processed messages to avoid duplicates (true/false)
+# - content_filter_prompt: LLM prompt for filtering relevant content (optional)
+#
+# Content Filtering:
+# The content_filter_prompt field allows you to specify criteria for which messages
+# should be processed. The LLM will evaluate each message against this prompt and
+# only process messages that meet the criteria. This helps avoid translating
+# irrelevant content like advertisements, spam, or off-topic posts.
+#
+# Example content_filter_prompt:
+# "Only process messages that contain news, important announcements, or relevant
+# updates. Skip advertisements, personal posts, or spam content." 
