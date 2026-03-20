@@ -57,6 +57,8 @@ telegram-translator digest podcasts                    # List configured podcast
 telegram-translator digest status --date 2026-03-20   # Show digest status
 ```
 
+Use `/podcast [name]` skill to run the full pipeline interactively — it handles secrets, Voicebox checks, all steps, and verification. See `.claude/skills/podcast/SKILL.md`.
+
 ## Voicebox Integration
 
 - API at `http://localhost:17493` (configurable per-podcast via `voicebox.url`)
