@@ -93,20 +93,59 @@ Before generating the executive summary, the pipeline fetches up to 3 recent pri
 
 ## Publishing Pipeline
 
-`digest publish` encodes WAV → M4A (AAC), builds an RSS 2.0 + iTunes feed, and optionally deploys via rsync.
+`digest publish` encodes WAV → M4A (AAC), builds an RSS 2.0 + iTunes feed, generates an HTML index page, and optionally deploys via rsync.
 
-Per-podcast config under `publish:` keys: `base_url`, `publish_dir`, `m4a_bitrate`, `show_artwork`, `show_description`, `show_category`, `show_subcategory`, `explicit`, `sync_command`.
+Per-podcast config under `publish:` keys: `base_url`, `publish_dir`, `m4a_bitrate`, `show_artwork`, `show_description`, `show_category`, `show_subcategory`, `explicit`, `copyright`, `sync_command`.
 
 Publish directory structure:
 ```
 publish/{podcast_name}/
   feed.xml
+  index.html
   artwork.jpg
   episodes/
     {podcast_name}_{date}.m4a
 ```
 
 See `docs/publishing.md` for the full guide including Apple Podcasts submission.
+
+## RSS Feed — Apple Podcasts Compliance
+
+The feed generator (`feed_generator.py`) targets Apple Podcasts spec compliance. Key design decisions:
+
+**Namespaces used** (only these three — validated against Apple spec):
+- `itunes:` — Apple's own podcast namespace (required)
+- `content:` — for `<content:encoded>` HTML show notes (Apple-supported)
+- `atom:` — for `<atom:link rel="self">` canonical URL (PSP-1 best practice, harmless)
+
+**Namespaces NOT used** (intentionally excluded):
+- `podcast:` (podcastindex.org) — Apple ignores entirely. Tags like `podcast:locked`, `podcast:medium` are Podcasting 2.0 only.
+
+**Deprecated tags NOT used**:
+- `itunes:owner` — deprecated by Apple since Aug 2022, they use Apple ID from Podcasts Connect instead
+- `itunes:summary`, `itunes:subtitle`, `itunes:keywords` — all deprecated
+
+**CDATA for HTML descriptions** (per Apple spec):
+- Episode `<description>` and `<content:encoded>` contain HTML wrapped in `<![CDATA[...]]>`
+- Show-level `<description>` is plain text (from config)
+- ElementTree can't produce CDATA natively — a marker/post-processing approach is used (`_CDATA_MARK` prefix → `_inject_cdata()` after serialization)
+
+**Built-in validation**:
+- `_validate_feed()` runs before every write, checks all Apple-required tags at show and episode level
+- Raises `ValueError` with details if anything is missing (e.g., enclosure without url/length/type)
+
+**HTML index page**:
+- `publisher.py` generates `index.html` alongside `feed.xml` on every rebuild
+- Dark theme, mobile-friendly, inline audio player, collapsible show notes
+- Episode summaries converted from Markdown to HTML via `_markdown_to_html()`
+
+## Tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+- `tests/test_feed_generator.py` — 43 tests covering Apple-required/recommended tags, CDATA wrapping, Markdown-to-HTML conversion, episode numbering, validation
 
 ## Database
 
@@ -146,9 +185,11 @@ This project uses its **own dedicated Telethon session**, separate from `~/Proje
 The summarizer injects guardrails into both the executive summary and podcast script prompts:
 
 - **Executive stage**: "Only cover topics that have actual content. Do NOT invent categories or mention that a topic had no developments."
-- **Script stage**: "Never mention that a topic had no news or was quiet. Only discuss topics present in the summary."
+- **Script stage**: "Never mention that a topic had no news or was quiet. Only discuss topics present in the summary. Mark each major topic transition with a line starting with `**Topic Name**` (Markdown bold)."
 
 These prevent the LLM from generating filler about empty categories (e.g., "Science was quiet today..."), regardless of what the user-configured prompt says.
+
+The `**Topic Name**` headers in the script are detected by `split_script_by_topics()` in `podcast_generator.py` to insert whoosh sound effects at topic transitions.
 
 ## Script Output
 
@@ -160,3 +201,6 @@ During TTS generation, the podcast script is written to `{output_dir}/{podcast_n
 - Secrets: `source ~/.secrets` — provides `OPENAI_API_KEY`, `TTR_API_ID`, `TTR_API_HASH`, `TGP_API_ID`, `TGP_API_HASH`
 - Related project: `~/Projects/tgp` — Telegram profile manager with its own sessions (do not share)
 - Hosting: `podcasts.getpagespeed.com` on Linode, nginx vhost in `~/Projects/ansible/host_vars/web.getpagespeed.com.yml`
+- Nginx config: `static` template with `expires 5m` override for `.xml` files (feed freshness), `dynamic_extensions: [xml]`
+- Repo: private at `git@github.com:dvershinin/telegram_translator.git`, no upstream fork
+- CLI entry point: `python3 -m telegram_translator.cli` (or `telegram-translator` if installed)
