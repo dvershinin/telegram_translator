@@ -276,6 +276,7 @@ class ConfigManager:
             "pause_between_segments_ms": int(
                 cfg.get("pause_between_segments_ms", 800)
             ),
+            "publish": cfg.get("publish", {}),
         }
 
     def _build_legacy_podcast_config(self) -> Dict[str, Any]:
@@ -329,6 +330,7 @@ class ConfigManager:
             "pause_between_segments_ms": int(
                 podcast_cfg.get("pause_between_segments_ms", 800)
             ),
+            "publish": {},
         }
 
     def print_app_info(self):

@@ -16,10 +16,17 @@ data/*.db
 # Generated podcast audio
 podcasts/*.wav
 podcasts/*/*.wav
+podcasts/*/*.m4a
 podcasts/.segments_*/
 
 # Podcast audio assets (downloaded per-user, not source code)
 podcasts/assets/
+
+# Publishing output
+publish/
+
+# Caches
+.cache/
 
 # Playwright MCP cache
 .playwright-mcp/

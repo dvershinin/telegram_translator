@@ -1,7 +1,9 @@
 """Voicebox-based podcast audio generation."""
 
+import hashlib
 import logging
 import re
+import shutil
 import struct
 import wave
 from pathlib import Path
@@ -179,14 +181,22 @@ def _load_audio_asset(
 class PodcastGenerator:
     """Generate podcast audio via Voicebox API."""
 
-    def __init__(self, config: dict):
+    def __init__(
+        self,
+        config: dict,
+        tts_cache_dir: Path | None = None,
+        no_cache: bool = False,
+    ):
         """Initialize the podcast generator.
 
         Args:
             config: Resolved podcast config dict with keys: voicebox_url,
                 voice_profile, language, output_dir, pause_between_segments_ms,
                 audio (dict with asset paths and mixing params), name.
+            tts_cache_dir: Directory for TTS segment cache files.
+            no_cache: If True, bypass TTS cache entirely.
         """
+        self.tts_cache_dir = tts_cache_dir if not no_cache else None
         self.podcast_name = config.get("name", "_default")
         self.voicebox_url = config.get(
             "voicebox_url", "http://localhost:17493"
@@ -454,6 +464,21 @@ class PodcastGenerator:
             f"Available profiles: {available}"
         )
 
+    def _tts_cache_path(self, text: str) -> Path | None:
+        """Compute the TTS cache file path for a text segment.
+
+        Args:
+            text: Segment text.
+
+        Returns:
+            Cache file path, or None if caching is disabled.
+        """
+        if not self.tts_cache_dir:
+            return None
+        payload = f"{text}:{self.voice_profile_name}"
+        h = hashlib.sha256(payload.encode()).hexdigest()
+        return self.tts_cache_dir / f"{h}.wav"
+
     async def generate_segment(
         self,
         text: str,
@@ -471,6 +496,14 @@ class PodcastGenerator:
         Raises:
             RuntimeError: If generation fails.
         """
+        # Check TTS cache
+        cached = self._tts_cache_path(text)
+        if cached and cached.exists():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(cached, output_path)
+            logger.info("TTS cache hit for segment")
+            return output_path
+
         profile_id = await self._get_profile_id()
 
         payload = {
@@ -507,6 +540,12 @@ class PodcastGenerator:
                     output_path,
                     len(audio_response.content),
                 )
+
+                # Save to TTS cache
+                if cached:
+                    cached.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(output_path, cached)
+
                 return output_path
 
         except httpx.HTTPError:
@@ -529,6 +568,11 @@ class PodcastGenerator:
         Returns:
             Path to the final podcast WAV file.
         """
+        # Write script to file for review during generation
+        script_path = self.output_dir / f"{self.podcast_name}_{date}.txt"
+        script_path.write_text(script, encoding="utf-8")
+        logger.info("Script saved: %s", script_path)
+
         segments, topic_boundaries = split_script_by_topics(script)
         logger.info(
             "Split podcast script into %d segments (%d chars total, "

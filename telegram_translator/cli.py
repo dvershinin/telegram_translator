@@ -325,14 +325,15 @@ def digest():
 @digest.command(name="run")
 @click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
 @click.option("--podcast", "podcast_name", default=None, help="Podcast name (runs all if omitted)")
-def digest_run(date, podcast_name):
+@click.option("--no-cache", is_flag=True, help="Bypass LLM and TTS cache")
+def digest_run(date, podcast_name, no_cache):
     """Run the full digest pipeline: collect, summarize, podcast."""
     from telegram_translator.digest import DigestPipeline
 
     async def _run():
         config_mgr = ConfigManager()
         pipeline = DigestPipeline(config_mgr, podcast_name=podcast_name)
-        results = await pipeline.run(date)
+        results = await pipeline.run(date, no_cache=no_cache)
 
         for pname, result in results.items():
             click.echo(f"Digest complete: {pname} ({date or 'today'})")
@@ -365,14 +366,15 @@ def digest_collect(date, podcast_name):
 @digest.command(name="summarize")
 @click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
 @click.option("--podcast", "podcast_name", default=None, help="Podcast name (summarizes all if omitted)")
-def digest_summarize(date, podcast_name):
+@click.option("--no-cache", is_flag=True, help="Bypass LLM cache")
+def digest_summarize(date, podcast_name, no_cache):
     """Generate summaries and podcast script from collected content."""
     from telegram_translator.digest import DigestPipeline
 
     async def _run():
         config_mgr = ConfigManager()
         pipeline = DigestPipeline(config_mgr, podcast_name=podcast_name)
-        results = await pipeline.summarize(date)
+        results = await pipeline.summarize(date, no_cache=no_cache)
 
         for pname, result in results.items():
             click.echo(f"Summarization complete: {pname} ({date or 'today'})")
@@ -387,14 +389,15 @@ def digest_summarize(date, podcast_name):
 @digest.command(name="podcast")
 @click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
 @click.option("--podcast", "podcast_name", default=None, help="Podcast name (generates all if omitted)")
-def digest_podcast(date, podcast_name):
+@click.option("--no-cache", is_flag=True, help="Bypass TTS segment cache")
+def digest_podcast(date, podcast_name, no_cache):
     """Generate podcast audio from an existing script."""
     from telegram_translator.digest import DigestPipeline
 
     async def _run():
         config_mgr = ConfigManager()
         pipeline = DigestPipeline(config_mgr, podcast_name=podcast_name)
-        results = await pipeline.podcast(date)
+        results = await pipeline.podcast(date, no_cache=no_cache)
         for pname, audio_path in results.items():
             click.echo(f"Podcast generated: {pname} -> {audio_path}")
 
@@ -485,6 +488,95 @@ def digest_podcasts():
         voice = cfg.get("voice_profile", "?")
         click.echo(f"  {name}: {title}")
         click.echo(f"    Voice: {voice}, Sources: {', '.join(sources)}")
+
+
+@digest.group(name="cache")
+def digest_cache():
+    """Manage digest caches."""
+
+
+@digest_cache.command(name="clear")
+def digest_cache_clear():
+    """Clear LLM and TTS caches."""
+    from telegram_translator.content_store import ContentStore
+
+    config_mgr = ConfigManager()
+    db_path = config_mgr.get_database_path("content_store.db")
+    store = ContentStore(db_path)
+
+    # Clear LLM cache
+    count = store.clear_llm_cache()
+    click.echo(f"Cleared {count} LLM cache entries")
+
+    # Clear TTS cache
+    tts_dir = Path(".cache/tts")
+    if tts_dir.exists():
+        import shutil
+        file_count = sum(1 for _ in tts_dir.glob("*.wav"))
+        shutil.rmtree(tts_dir)
+        click.echo(f"Cleared {file_count} TTS cache files")
+    else:
+        click.echo("TTS cache directory not found (nothing to clear)")
+
+
+@digest.command(name="publish")
+@click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
+@click.option("--podcast", "podcast_name", default=None, help="Podcast name (publishes all if omitted)")
+def digest_publish(date, podcast_name):
+    """Encode M4A, rebuild RSS feed, and deploy."""
+    from telegram_translator.publisher import PodcastPublisher
+
+    async def _run():
+        config_mgr = ConfigManager()
+        db_path = config_mgr.get_database_path("content_store.db")
+        from telegram_translator.content_store import ContentStore
+        store = ContentStore(db_path)
+
+        all_podcasts = config_mgr.resolve_podcast_configs()
+        if podcast_name:
+            if podcast_name not in all_podcasts:
+                raise click.ClickException(
+                    f"Unknown podcast '{podcast_name}'. "
+                    f"Available: {list(all_podcasts.keys())}"
+                )
+            targets = {podcast_name: all_podcasts[podcast_name]}
+        else:
+            targets = all_podcasts
+
+        for pname, pcfg in targets.items():
+            publisher = PodcastPublisher(pcfg, store)
+            m4a_path = await publisher.publish(pname, date)
+            click.echo(f"Published: {pname} -> {m4a_path}")
+
+    asyncio.run(_run())
+
+
+@digest.command(name="feed")
+@click.option("--podcast", "podcast_name", default=None, help="Podcast name (rebuilds all if omitted)")
+def digest_feed(podcast_name):
+    """Rebuild RSS feed only (no encoding or sync)."""
+    from telegram_translator.publisher import PodcastPublisher
+
+    config_mgr = ConfigManager()
+    db_path = config_mgr.get_database_path("content_store.db")
+    from telegram_translator.content_store import ContentStore
+    store = ContentStore(db_path)
+
+    all_podcasts = config_mgr.resolve_podcast_configs()
+    if podcast_name:
+        if podcast_name not in all_podcasts:
+            raise click.ClickException(
+                f"Unknown podcast '{podcast_name}'. "
+                f"Available: {list(all_podcasts.keys())}"
+            )
+        targets = {podcast_name: all_podcasts[podcast_name]}
+    else:
+        targets = all_podcasts
+
+    for pname, pcfg in targets.items():
+        publisher = PodcastPublisher(pcfg, store)
+        feed_path = publisher.rebuild_feed(pname)
+        click.echo(f"Feed rebuilt: {pname} -> {feed_path}")
 
 
 if __name__ == '__main__':

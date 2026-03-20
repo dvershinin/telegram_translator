@@ -10,8 +10,10 @@ click>=8.1.0
 # Digest pipeline dependencies
 feedparser>=6.0
 trafilatura>=1.6
+py3langid>=0.3
 httpx>=0.27
 pydub>=0.25
+mutagen>=1.47
 
 # Development dependencies (optional)
 # pytest>=7.0.0

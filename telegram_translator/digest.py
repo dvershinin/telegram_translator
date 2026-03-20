@@ -1,7 +1,8 @@
 """Digest pipeline orchestrator."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from telegram_translator.config_manager import ConfigManager
 from telegram_translator.content_store import ContentStore
@@ -54,7 +55,14 @@ class DigestPipeline:
         return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
 
     def _since(self, date: str) -> datetime:
-        """Return the start-of-day datetime for the given date string."""
+        """Return the content cutoff datetime.
+
+        For today's date, returns 24 hours ago to capture content
+        across timezone boundaries. For past dates, returns the
+        start of that day in UTC.
+        """
+        if date == self._today():
+            return datetime.now(tz=timezone.utc) - timedelta(hours=24)
         return datetime.strptime(date, "%Y-%m-%d").replace(
             tzinfo=timezone.utc
         )
@@ -105,8 +113,11 @@ class DigestPipeline:
             await client.connect()
             if not await client.is_user_authorized():
                 logger.warning(
-                    "Telegram session not authorized. "
-                    "Run 'telegram-translator start' first to authenticate."
+                    "Telegram session not authorized — "
+                    "Telegram sources will be skipped. To fix, run:\n"
+                    "  source ~/.secrets && telegram-translator start\n"
+                    "Enter the phone code, then Ctrl+C once the bot "
+                    "starts. After that, digest collect will work."
                 )
                 return 0
             logger.info("Telegram client connected for digest collection")
@@ -215,11 +226,16 @@ class DigestPipeline:
         logger.info("Collected %d new web articles", new_count)
         return new_count
 
-    async def summarize(self, date: str | None = None) -> dict:
+    async def summarize(
+        self,
+        date: str | None = None,
+        no_cache: bool = False,
+    ) -> dict:
         """Generate summaries for each podcast from collected content.
 
         Args:
             date: Target date (YYYY-MM-DD). Defaults to today.
+            no_cache: If True, bypass the LLM cache for this run.
 
         Returns:
             Dict mapping podcast name to result dict with keys:
@@ -242,6 +258,9 @@ class DigestPipeline:
                     pcfg,
                     title=pcfg.get("title", ""),
                     host_name=pcfg.get("host_name", ""),
+                    store=self.store,
+                    podcast_name=podcast_name,
+                    no_cache=no_cache,
                 )
 
                 # Filter to this podcast's sources
@@ -264,6 +283,43 @@ class DigestPipeline:
                     }
                     continue
 
+                # Content selection filter — narrow items before
+                # summarization so each podcast only sees relevant
+                # articles.
+                selection_prompt = pcfg.get("selection_prompt", "")
+                filtered_items_by_source = None
+                if selection_prompt:
+                    all_items = self.store.get_content_since(
+                        since, source_names=source_filter,
+                    )
+                    all_items = await summarizer.select_content(
+                        all_items, selection_prompt,
+                    )
+                    # Re-derive source_names from filtered items
+                    filtered_items_by_source = {}
+                    for item in all_items:
+                        filtered_items_by_source.setdefault(
+                            item.source_name, []
+                        ).append(item)
+                    source_names = sorted(filtered_items_by_source.keys())
+
+                    if not source_names:
+                        msg = (
+                            f"No content survived selection for "
+                            f"podcast '{podcast_name}'"
+                        )
+                        logger.warning(msg)
+                        self.store.update_digest(
+                            date, podcast_name,
+                            status="error", error_message=msg,
+                        )
+                        results[podcast_name] = {
+                            "source_summaries": {},
+                            "executive_summary": "",
+                            "podcast_script": "",
+                        }
+                        continue
+
                 # Resolve per-source prompts
                 all_sources = {
                     **pcfg.get("sources", {}).get("telegram", {}),
@@ -271,26 +327,55 @@ class DigestPipeline:
                 }
 
                 source_summaries = {}
+                source_biases = {}
                 for source_name in source_names:
-                    items = self.store.get_content_since(
-                        since, source_name=source_name
-                    )
+                    if filtered_items_by_source is not None:
+                        items = filtered_items_by_source.get(
+                            source_name, []
+                        )
+                    else:
+                        items = self.store.get_content_since(
+                            since, source_name=source_name
+                        )
                     if not items:
                         continue
 
-                    source_prompt = all_sources.get(
-                        source_name, {}
-                    ).get("prompt", "")
+                    source_cfg = all_sources.get(source_name, {})
+                    source_prompt = source_cfg.get("prompt", "")
+                    source_bias = source_cfg.get("bias", "")
+
+                    if source_bias:
+                        source_biases[source_name] = source_bias
 
                     summary = await summarizer.summarize_source(
-                        items, source_name, source_prompt
+                        items, source_name, source_prompt, source_bias
                     )
                     if summary:
                         source_summaries[source_name] = summary
 
+                # Inject prior episode context for dedup
+                prior = self.store.get_recent_summaries(
+                    podcast_name, date, limit=3,
+                )
+                prior_context = None
+                if prior:
+                    parts = []
+                    for pdate, psummary in prior:
+                        parts.append(
+                            f"[{pdate}]:\n{psummary[:2000]}"
+                        )
+                    prior_context = (
+                        "PREVIOUSLY COVERED (recent episodes — "
+                        "focus on what is NEW today, don't "
+                        "re-explain these stories from scratch):"
+                        "\n\n" + "\n\n".join(parts)
+                    )
+
                 executive = await summarizer.executive_summary(
                     source_summaries,
                     pcfg.get("executive_prompt") or None,
+                    source_biases=source_biases or None,
+                    prior_context=prior_context,
                 )
 
                 script = await summarizer.generate_podcast_script(
@@ -331,17 +416,24 @@ class DigestPipeline:
 
         return results
 
-    async def podcast(self, date: str | None = None) -> dict:
+    async def podcast(
+        self,
+        date: str | None = None,
+        no_cache: bool = False,
+    ) -> dict:
         """Generate podcast audio for each podcast.
 
         Args:
             date: Target date (YYYY-MM-DD). Defaults to today.
+            no_cache: If True, bypass the TTS segment cache.
 
         Returns:
             Dict mapping podcast name to audio file path string.
         """
         date = date or self._today()
         results = {}
+
+        tts_cache_dir = Path(".cache/tts")
 
         for podcast_name, pcfg in self.podcast_configs.items():
             digest = self.store.get_digest(date, podcast_name)
@@ -357,7 +449,11 @@ class DigestPipeline:
             )
 
             try:
-                generator = PodcastGenerator(pcfg)
+                generator = PodcastGenerator(
+                    pcfg,
+                    tts_cache_dir=tts_cache_dir,
+                    no_cache=no_cache,
+                )
                 audio_path = await generator.generate_podcast(
                     digest.podcast_script, date
                 )
@@ -391,11 +487,16 @@ class DigestPipeline:
 
         return results
 
-    async def run(self, date: str | None = None) -> dict:
+    async def run(
+        self,
+        date: str | None = None,
+        no_cache: bool = False,
+    ) -> dict:
         """Run the full digest pipeline.
 
         Args:
             date: Target date (YYYY-MM-DD). Defaults to today.
+            no_cache: If True, bypass LLM and TTS caches.
 
         Returns:
             Dict mapping podcast name to result dict.
@@ -406,11 +507,11 @@ class DigestPipeline:
         new_items = await self.collect(date)
         logger.info("Collected %d new items", new_items)
 
-        results = await self.summarize(date)
+        results = await self.summarize(date, no_cache=no_cache)
 
         for podcast_name in self.podcast_configs:
             try:
-                audio_path = await self.podcast(date)
+                audio_path = await self.podcast(date, no_cache=no_cache)
                 if podcast_name in audio_path:
                     results.setdefault(podcast_name, {})
                     results[podcast_name]["audio_path"] = audio_path[

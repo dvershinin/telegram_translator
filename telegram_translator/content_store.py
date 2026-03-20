@@ -38,6 +38,9 @@ class Digest:
     executive_summary: str = ""
     podcast_script: str = ""
     audio_path: str = ""
+    m4a_path: str = ""
+    duration_seconds: float = 0.0
+    published_at: Optional[datetime] = None
     status: str = "pending"
     error_message: str = ""
     created_at: Optional[datetime] = None
@@ -95,6 +98,20 @@ class ContentStore:
                 else:
                     self._create_digests_table(conn)
 
+                # Add publish columns to existing digests table
+                self._migrate_digests_publish_columns(conn)
+
+                # Create LLM cache table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS llm_cache (
+                        cache_key TEXT PRIMARY KEY,
+                        stage TEXT NOT NULL,
+                        output_text TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
                 conn.commit()
                 logger.info("Content store initialized at %s", self.db_path)
 
@@ -114,6 +131,9 @@ class ContentStore:
                 executive_summary TEXT,
                 podcast_script TEXT,
                 audio_path TEXT,
+                m4a_path TEXT,
+                duration_seconds REAL,
+                published_at TIMESTAMP,
                 status TEXT DEFAULT 'pending',
                 error_message TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -171,6 +191,24 @@ class ContentStore:
             ON digests(podcast_name, date)
         """)
         logger.info("Digests table migration complete")
+
+    @staticmethod
+    def _migrate_digests_publish_columns(conn: sqlite3.Connection):
+        """Add publishing columns to digests table if missing."""
+        cursor = conn.execute("PRAGMA table_info(digests)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        new_columns = [
+            ("m4a_path", "TEXT"),
+            ("duration_seconds", "REAL"),
+            ("published_at", "TIMESTAMP"),
+        ]
+        for col_name, col_type in new_columns:
+            if col_name not in columns:
+                conn.execute(
+                    f"ALTER TABLE digests ADD COLUMN {col_name} {col_type}"
+                )
+                logger.info("Added column %s to digests table", col_name)
 
     @staticmethod
     def _content_hash(source_name: str, content: str) -> str:
@@ -508,6 +546,104 @@ class ContentStore:
             logger.error("Failed to get source names", exc_info=True)
             return []
 
+    def get_llm_cache(self, cache_key: str) -> Optional[str]:
+        """Retrieve a cached LLM response.
+
+        Args:
+            cache_key: The cache key string.
+
+        Returns:
+            Cached output text, or None if not found.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT output_text FROM llm_cache "
+                    "WHERE cache_key = ?",
+                    (cache_key,),
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception:
+            logger.error("Failed to read LLM cache", exc_info=True)
+            return None
+
+    def set_llm_cache(
+        self,
+        cache_key: str,
+        stage: str,
+        output: str,
+        model: str,
+    ) -> None:
+        """Store an LLM response in the cache.
+
+        Args:
+            cache_key: The cache key string.
+            stage: Pipeline stage name (selection, source_summary, etc.).
+            output: The LLM output text.
+            model: Model identifier used.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO llm_cache "
+                    "(cache_key, stage, output_text, model) "
+                    "VALUES (?, ?, ?, ?)",
+                    (cache_key, stage, output, model),
+                )
+                conn.commit()
+        except Exception:
+            logger.error("Failed to write LLM cache", exc_info=True)
+
+    def clear_llm_cache(self) -> int:
+        """Delete all LLM cache entries.
+
+        Returns:
+            Number of rows deleted.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("DELETE FROM llm_cache")
+                conn.commit()
+                count = cursor.rowcount
+                logger.info("Cleared %d LLM cache entries", count)
+                return count
+        except Exception:
+            logger.error("Failed to clear LLM cache", exc_info=True)
+            return 0
+
+    def get_recent_summaries(
+        self,
+        podcast_name: str,
+        before_date: str,
+        limit: int = 3,
+    ) -> list[tuple[str, str]]:
+        """Return recent episode summaries for prior-context injection.
+
+        Args:
+            podcast_name: Podcast identifier.
+            before_date: Only return episodes before this date (YYYY-MM-DD).
+            limit: Maximum number of prior episodes.
+
+        Returns:
+            List of (date, executive_summary) tuples, most recent first.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT date, executive_summary FROM digests "
+                    "WHERE podcast_name = ? AND date < ? "
+                    "AND executive_summary != '' "
+                    "ORDER BY date DESC LIMIT ?",
+                    (podcast_name, before_date, limit),
+                )
+                return [(row[0], row[1]) for row in cursor.fetchall()]
+        except Exception:
+            logger.error(
+                "Failed to get recent summaries", exc_info=True
+            )
+            return []
+
     @staticmethod
     def _row_to_content_item(row: sqlite3.Row) -> ContentItem:
         """Convert a database row to a ContentItem."""
@@ -544,6 +680,9 @@ class ContentStore:
             executive_summary=row["executive_summary"] or "",
             podcast_script=row["podcast_script"] or "",
             audio_path=row["audio_path"] or "",
+            m4a_path=row["m4a_path"] or "",
+            duration_seconds=float(row["duration_seconds"] or 0.0),
+            published_at=row["published_at"],
             status=row["status"] or "pending",
             error_message=row["error_message"] or "",
             created_at=row["created_at"],

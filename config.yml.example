@@ -99,7 +99,12 @@ podcasts:
     selection_prompt: "Select articles about geopolitics, military, and economics"
     voice_profile: "angiebunny27"
     language: "en"
-    model: "gpt-4o"
+    model: "gpt-4o"                        # default for all stages
+    # Per-stage model overrides (optional, fall back to model):
+    # selection_model: "gpt-4o-mini"       # content filtering (fast, cheap)
+    # summarization_model: "gpt-4o-mini"   # per-source summaries (extraction)
+    # executive_model: "gpt-4o"            # cross-source synthesis (reasoning)
+    # script_model: "gpt-4o"               # podcast script (creative writing)
     executive_prompt: |
       You are a professional news analyst creating a daily executive briefing.
       Synthesize the source summaries into a cohesive overview of today's most
@@ -122,3 +127,14 @@ podcasts:
       background_fade_seconds: 3.0
     output_dir: "./podcasts/daily_briefing"
     pause_between_segments_ms: 800
+    publish:
+      base_url: "https://podcasts.getpagespeed.com/daily_briefing"
+      publish_dir: "./publish/daily_briefing"
+      m4a_bitrate: "128k"
+      show_artwork: "./podcasts/assets/daily_briefing_artwork.jpg"
+      show_description: "Daily geopolitics, tech, and science briefing."
+      show_category: "News"
+      show_subcategory: "Daily News"
+      explicit: false
+      copyright: "\u00a9 2024 Your Company"  # Copyright notice
+      sync_command: "rsync -avz ./publish/daily_briefing/ podcasts@web.getpagespeed.com:/srv/www/podcasts.getpagespeed.com/httpdocs/daily_briefing/"
