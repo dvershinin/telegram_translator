@@ -1,0 +1,8 @@
+# Generated episodes (WAV, TXT scripts)
+*.wav
+*.txt
+.segments_*/
+
+# Keep assets
+!assets/
+!assets/**
