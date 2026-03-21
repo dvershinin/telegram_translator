@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -449,6 +450,10 @@ class Summarizer:
     ) -> str:
         """Generate a podcast monologue script from the executive summary.
 
+        Uses OpenAI structured output to return JSON with sections, each
+        containing a topic name (or null for intro/outro) and spoken text.
+        This keeps topic headers out of the TTS pipeline entirely.
+
         Template variables ``{title}``, ``{host_name}``, and ``{date}``
         in the prompt are substituted with the configured values.
 
@@ -458,16 +463,17 @@ class Summarizer:
             prompt: Custom podcast prompt override.
 
         Returns:
-            Podcast script text.
+            JSON string with structured sections.
         """
         raw_prompt = prompt or self.podcast_prompt
         raw_prompt += (
             "\n\nNever mention that a topic had no news or was quiet. "
             "Only discuss topics present in the summary. "
-            "Mark each major topic transition with a line starting with "
-            "**Topic Name** (Markdown bold). This is used for audio "
-            "transitions. Don't use bold headers for the opening greeting "
-            "or closing sign-off."
+            "Return the script as structured sections. Each section has a "
+            "'topic' field (the topic name string when starting a new major "
+            "topic, or null for intro/outro) and a 'text' field (the spoken "
+            "content only — no markdown, no formatting, no asterisks). "
+            "Don't set a topic for the opening greeting or closing sign-off."
         )
         template_vars = defaultdict(
             str,
@@ -489,10 +495,73 @@ class Summarizer:
             self.script_model,
         )
 
+        use_model = self.script_model
+
         cache_key = self._make_cache_key(
-            "script", system, user, self.script_model,
+            "script", system, user, use_model,
         )
-        return await self._chat(
-            system, user, max_tokens=8192, temperature=0.7,
-            model=self.script_model, cache_key=cache_key,
+
+        # Check cache
+        if cache_key and self.store:
+            cached = self.store.get_llm_cache(cache_key)
+            if cached is not None:
+                logger.info("Cache hit for script, skipping API call")
+                return cached
+
+        response = await self.client.chat.completions.create(
+            model=use_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=8192,
+            temperature=0.7,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "podcast_script",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "sections": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "topic": {
+                                            "type": ["string", "null"],
+                                            "description": (
+                                                "Topic name for a new major "
+                                                "topic, or null for "
+                                                "intro/outro."
+                                            ),
+                                        },
+                                        "text": {
+                                            "type": "string",
+                                            "description": (
+                                                "Spoken content only — no "
+                                                "markdown or formatting."
+                                            ),
+                                        },
+                                    },
+                                    "required": ["topic", "text"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["sections"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
         )
+        result = response.choices[0].message.content.strip()
+
+        # Store in cache
+        if cache_key and self.store:
+            self.store.set_llm_cache(
+                cache_key, "script", result, use_model,
+            )
+
+        return result

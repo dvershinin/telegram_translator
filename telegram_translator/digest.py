@@ -1,5 +1,6 @@
 """Digest pipeline orchestrator."""
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -291,10 +292,20 @@ class DigestPipeline:
                 if selection_prompt:
                     all_items = self.store.get_content_since(
                         since, source_names=source_filter,
+                        exclude_used=True,
                     )
                     all_items = await summarizer.select_content(
                         all_items, selection_prompt,
                     )
+                    # Track selected item IDs for publish-time marking
+                    selected_ids = [
+                        item.id for item in all_items if item.id is not None
+                    ]
+                    self.store.update_digest(
+                        date, podcast_name,
+                        selected_item_ids=json.dumps(selected_ids),
+                    )
+
                     # Re-derive source_names from filtered items
                     filtered_items_by_source = {}
                     for item in all_items:

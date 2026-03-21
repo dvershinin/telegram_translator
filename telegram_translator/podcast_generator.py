@@ -1,6 +1,7 @@
 """Voicebox-based podcast audio generation."""
 
 import hashlib
+import json
 import logging
 import re
 import shutil
@@ -72,10 +73,11 @@ def split_script_by_topics(
     text: str,
     max_chars: int = 500,
 ) -> tuple[list[str], set[int]]:
-    """Split a script into TTS segments, tracking topic boundaries.
+    """Split a plain-text script into TTS segments, tracking topic boundaries.
 
     Topic boundaries are detected by lines starting with ``**`` (Markdown
-    bold headers).
+    bold headers).  Used as a legacy fallback for scripts stored before
+    structured output was introduced.
 
     Args:
         text: The full podcast script.
@@ -98,6 +100,58 @@ def split_script_by_topics(
         all_segments.extend(chunks)
 
     return all_segments, topic_boundaries
+
+
+def parse_structured_sections(
+    script_json: str,
+    max_chars: int = 500,
+) -> tuple[list[str], set[int]]:
+    """Parse a structured JSON script into TTS segments with topic boundaries.
+
+    Args:
+        script_json: JSON string with ``{"sections": [...]}``.
+        max_chars: Max chars per TTS segment.
+
+    Returns:
+        A tuple of (segments, topic_boundary_indices).
+    """
+    data = json.loads(script_json)
+    sections = data["sections"]
+
+    all_segments: list[str] = []
+    topic_boundaries: set[int] = set()
+
+    for section in sections:
+        text = section.get("text", "").strip()
+        if not text:
+            continue
+        if section.get("topic"):
+            topic_boundaries.add(len(all_segments))
+        chunks = split_script(text, max_chars=max_chars)
+        all_segments.extend(chunks)
+
+    return all_segments, topic_boundaries
+
+
+def sections_to_readable(script_json: str) -> str:
+    """Convert structured JSON sections to human-readable text.
+
+    Args:
+        script_json: JSON string with ``{"sections": [...]}``.
+
+    Returns:
+        Readable text with ``[Topic Name]`` headers.
+    """
+    data = json.loads(script_json)
+    parts: list[str] = []
+    for section in data["sections"]:
+        topic = section.get("topic")
+        text = section.get("text", "").strip()
+        if topic:
+            parts.append(f"[{topic}]")
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
 
 
 def _load_asset_wav(
@@ -561,24 +615,32 @@ class PodcastGenerator:
     ) -> Path:
         """Generate a full podcast from a script.
 
+        Accepts either structured JSON (from structured output) or legacy
+        plain-text scripts with ``**`` markdown headers.
+
         Args:
-            script: The podcast script text.
+            script: The podcast script (JSON or plain text).
             date: Date string for the output filename.
 
         Returns:
             Path to the final podcast WAV file.
         """
-        # Write script to file for review during generation
+        # Detect format and parse accordingly
         script_path = self.output_dir / f"{self.podcast_name}_{date}.txt"
-        script_path.write_text(script, encoding="utf-8")
-        logger.info("Script saved: %s", script_path)
+        is_structured = script.lstrip().startswith("{")
 
-        segments, topic_boundaries = split_script_by_topics(script)
+        if is_structured:
+            readable = sections_to_readable(script)
+            script_path.write_text(readable, encoding="utf-8")
+            segments, topic_boundaries = parse_structured_sections(script)
+        else:
+            script_path.write_text(script, encoding="utf-8")
+            segments, topic_boundaries = split_script_by_topics(script)
+
+        logger.info("Script saved: %s", script_path)
         logger.info(
-            "Split podcast script into %d segments (%d chars total, "
-            "%d topic boundaries)",
+            "Split podcast script into %d segments (%d topic boundaries)",
             len(segments),
-            len(script),
             len(topic_boundaries),
         )
 

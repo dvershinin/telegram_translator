@@ -187,11 +187,26 @@ This project uses its **own dedicated Telethon session**, separate from `~/Proje
 The summarizer injects guardrails into both the executive summary and podcast script prompts:
 
 - **Executive stage**: "Only cover topics that have actual content. Do NOT invent categories or mention that a topic had no developments."
-- **Script stage**: "Never mention that a topic had no news or was quiet. Only discuss topics present in the summary. Mark each major topic transition with a line starting with `**Topic Name**` (Markdown bold)."
+- **Script stage**: "Never mention that a topic had no news or was quiet. Only discuss topics present in the summary."
 
 These prevent the LLM from generating filler about empty categories (e.g., "Science was quiet today..."), regardless of what the user-configured prompt says.
 
-The `**Topic Name**` headers in the script are detected by `split_script_by_topics()` in `podcast_generator.py` to insert whoosh sound effects at topic transitions.
+## Structured Script Output
+
+The podcast script uses OpenAI structured output (JSON schema) to separate topic names from spoken text:
+
+```json
+{"sections": [
+  {"topic": null, "text": "Hello and welcome..."},
+  {"topic": "Ukraine Conflict", "text": "Today we saw..."},
+  {"topic": null, "text": "That wraps up..."}
+]}
+```
+
+- `topic`: string for topic transitions (triggers whoosh in audio), null for intro/outro
+- `text`: spoken content only — no markdown, no formatting (never sent to TTS with headers)
+
+`parse_structured_sections()` in `podcast_generator.py` converts sections into TTS segments with topic boundary indices. Legacy plain-text scripts with `**Topic Name**` markdown headers are still supported via `split_script_by_topics()` fallback (auto-detected by whether the script starts with `{`).
 
 ## Script Output
 

@@ -1,6 +1,7 @@
 """Podcast publishing pipeline: encode, build RSS feed, deploy."""
 
 import html
+import json
 import logging
 import shutil
 import subprocess
@@ -92,13 +93,14 @@ class PodcastPublisher:
             wav_path, m4a_path, bitrate, metadata
         )
 
-        # Copy show artwork
+        # Copy show artwork + generate thumbnail for HTML page
         artwork_src = publish_cfg.get("show_artwork")
         if artwork_src:
             artwork_src = Path(artwork_src)
             if artwork_src.exists():
                 artwork_dst = publish_dir / artwork_src.name
                 shutil.copy2(artwork_src, artwork_dst)
+                self._generate_thumbnail(artwork_src, publish_dir)
 
         # Update digest record
         self.store.update_digest(
@@ -127,18 +129,70 @@ class PodcastPublisher:
             else:
                 logger.info("Sync complete")
 
+        # Mark selected content items as used
+        if digest.selected_item_ids:
+            try:
+                item_ids = json.loads(digest.selected_item_ids)
+                self.store.mark_items_used(date, podcast_name, item_ids)
+            except (json.JSONDecodeError, TypeError):
+                logger.error(
+                    "Failed to parse selected_item_ids for %s/%s",
+                    podcast_name, date, exc_info=True,
+                )
+
         logger.info(
             "Published %s/%s -> %s", podcast_name, date, m4a_path
         )
         return str(m4a_path)
 
     @staticmethod
+    def _generate_thumbnail(
+        artwork_src: Path,
+        publish_dir: Path,
+        size: int = 400,
+    ) -> Path | None:
+        """Generate a small JPEG thumbnail of the show artwork.
+
+        Args:
+            artwork_src: Path to the full-resolution artwork.
+            publish_dir: Output directory.
+            size: Thumbnail width/height in pixels.
+
+        Returns:
+            Path to the generated thumbnail, or None on failure.
+        """
+        thumb_path = publish_dir / "artwork_thumb.jpg"
+        try:
+            from PIL import Image
+
+            with Image.open(artwork_src) as img:
+                img = img.convert("RGB")
+                img.thumbnail((size, size), Image.LANCZOS)
+                img.save(thumb_path, "JPEG", quality=80, optimize=True)
+            logger.info(
+                "Generated artwork thumbnail: %s (%d bytes)",
+                thumb_path,
+                thumb_path.stat().st_size,
+            )
+            return thumb_path
+        except Exception:
+            logger.error(
+                "Failed to generate artwork thumbnail", exc_info=True,
+            )
+            return None
+
+    @staticmethod
     def _artwork_url(base_url: str, publish_cfg: dict) -> str:
-        """Derive the artwork URL from config."""
+        """Derive the full-res artwork URL for the RSS feed."""
         artwork_src = publish_cfg.get("show_artwork", "")
         if artwork_src and base_url:
             return f"{base_url}/{Path(artwork_src).name}"
         return f"{base_url}/artwork.jpg" if base_url else ""
+
+    @staticmethod
+    def _thumbnail_url(base_url: str) -> str:
+        """Derive the thumbnail artwork URL for the HTML page."""
+        return f"{base_url}/artwork_thumb.jpg" if base_url else ""
 
     def rebuild_feed(
         self,
@@ -238,7 +292,7 @@ class PodcastPublisher:
         title = self.config.get("title", podcast_name)
         description = publish_cfg.get("show_description", "")
         base_url = publish_cfg.get("base_url", "")
-        artwork_url = self._artwork_url(base_url, publish_cfg)
+        artwork_url = self._thumbnail_url(base_url)
         author = self.config.get("host_name", "")
         copyright_text = publish_cfg.get("copyright", "")
 

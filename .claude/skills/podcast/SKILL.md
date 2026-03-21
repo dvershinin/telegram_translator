@@ -58,11 +58,11 @@ python3 -m telegram_translator.cli digest summarize --podcast <name>
 ```
 Add `--no-cache` to force regeneration.
 
-After this step, verify the script has `**Topic Name**` headers (needed for whoosh transitions):
+After this step, verify the script is valid structured JSON with sections (needed for whoosh transitions):
 ```bash
-grep '^\*\*' podcasts/<name>/<name>_$(date +%Y-%m-%d).txt | head -5
+python3 -c "import json,sqlite3,pathlib; db=pathlib.Path.home()/'Library/Application Support/telegram_translator/databases/content_store.db'; r=sqlite3.connect(db).execute('SELECT podcast_script FROM digests WHERE date=? AND podcast_name=?',('$(date +%Y-%m-%d)','<name>')).fetchone(); d=json.loads(r[0]); topics=[s['topic'] for s in d['sections'] if s.get('topic')]; print(f'{len(d[\"sections\"])} sections, topics: {topics}')"
 ```
-If zero matches, the LLM didn't follow the guardrail — consider clearing cache and retrying.
+If parsing fails, the LLM returned plain text instead of JSON — consider clearing cache and retrying.
 
 ### Step 3: Generate Audio (`podcast`)
 Synthesize the podcast script into audio via Voicebox TTS. This takes ~90 minutes.

@@ -45,6 +45,7 @@ class Digest:
     error_message: str = ""
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    selected_item_ids: str = ""
     id: Optional[int] = None
 
 
@@ -110,6 +111,20 @@ class ContentStore:
                         model TEXT NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
+                """)
+
+                # Track which content items were used in each episode
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS digest_content_items (
+                        date TEXT NOT NULL,
+                        podcast_name TEXT NOT NULL,
+                        content_item_id INTEGER NOT NULL,
+                        UNIQUE(date, podcast_name, content_item_id)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_dci_content
+                    ON digest_content_items(content_item_id)
                 """)
 
                 conn.commit()
@@ -202,6 +217,7 @@ class ContentStore:
             ("m4a_path", "TEXT"),
             ("duration_seconds", "REAL"),
             ("published_at", "TIMESTAMP"),
+            ("selected_item_ids", "TEXT"),
         ]
         for col_name, col_type in new_columns:
             if col_name not in columns:
@@ -284,6 +300,7 @@ class ContentStore:
         since: datetime,
         source_name: Optional[str] = None,
         source_names: Optional[list[str]] = None,
+        exclude_used: bool = False,
     ) -> list[ContentItem]:
         """Retrieve content items collected since a given time.
 
@@ -291,6 +308,8 @@ class ContentStore:
             since: Cutoff datetime.
             source_name: Optional filter by single source.
             source_names: Optional filter by list of sources.
+            exclude_used: If True, exclude items already published
+                in a prior episode (any podcast).
 
         Returns:
             List of ContentItem objects.
@@ -302,11 +321,20 @@ class ContentStore:
 
                 since_str = since.strftime("%Y-%m-%d %H:%M:%S")
 
+                used_filter = ""
+                if exclude_used:
+                    used_filter = (
+                        " AND id NOT IN ("
+                        "SELECT content_item_id FROM digest_content_items"
+                        ")"
+                    )
+
                 if source_name:
                     cursor.execute(
-                        """
+                        f"""
                         SELECT * FROM content_items
                         WHERE collected_at >= ? AND source_name = ?
+                        {used_filter}
                         ORDER BY published_at ASC
                         """,
                         (since_str, source_name),
@@ -318,15 +346,17 @@ class ContentStore:
                         SELECT * FROM content_items
                         WHERE collected_at >= ?
                           AND source_name IN ({placeholders})
+                        {used_filter}
                         ORDER BY source_name, published_at ASC
                         """,
                         [since_str, *source_names],
                     )
                 else:
                     cursor.execute(
-                        """
+                        f"""
                         SELECT * FROM content_items
                         WHERE collected_at >= ?
+                        {used_filter}
                         ORDER BY source_name, published_at ASC
                         """,
                         (since_str,),
@@ -338,6 +368,42 @@ class ContentStore:
         except Exception:
             logger.error("Failed to query content", exc_info=True)
             return []
+
+    def mark_items_used(
+        self,
+        date: str,
+        podcast_name: str,
+        item_ids: list[int],
+    ) -> None:
+        """Record content items as used in a published episode.
+
+        Args:
+            date: Episode date string in YYYY-MM-DD format.
+            podcast_name: Podcast identifier.
+            item_ids: List of content_item IDs to mark as used.
+        """
+        if not item_ids:
+            return
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO digest_content_items
+                    (date, podcast_name, content_item_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    [(date, podcast_name, cid) for cid in item_ids],
+                )
+                conn.commit()
+                logger.info(
+                    "Marked %d items as used for %s/%s",
+                    len(item_ids), podcast_name, date,
+                )
+        except Exception:
+            logger.error(
+                "Failed to mark items used for %s/%s",
+                podcast_name, date, exc_info=True,
+            )
 
     def create_digest(
         self,
@@ -687,4 +753,5 @@ class ContentStore:
             error_message=row["error_message"] or "",
             created_at=row["created_at"],
             completed_at=row["completed_at"],
+            selected_item_ids=row["selected_item_ids"] or "",
         )
