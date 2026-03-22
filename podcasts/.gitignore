@@ -3,6 +3,10 @@
 *.txt
 .segments_*/
 
-# Keep assets
+# Keep shared assets
 !assets/
 !assets/**
+
+# Keep per-podcast assets
+!*/assets/
+!*/assets/**

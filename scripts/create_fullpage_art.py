@@ -7,10 +7,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ASSETS = PROJECT_ROOT / "podcasts" / "assets"
-SOURCE = ASSETS / "crosswire_artwork_3000.png"
-OUTPUT_PNG = ASSETS / "crosswire_fullpage.png"
-OUTPUT_JPG = ASSETS / "crosswire_fullpage.jpg"
+ASSETS = PROJECT_ROOT / "podcasts" / "crosswire" / "assets"
+SOURCE = ASSETS / "artwork_3000.png"
+OUTPUT_PNG = ASSETS / "fullpage.png"
+OUTPUT_JPG = ASSETS / "fullpage.jpg"
 
 # Canvas
 CANVAS_W, CANVAS_H = 2048, 2732

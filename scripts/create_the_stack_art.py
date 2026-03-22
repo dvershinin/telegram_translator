@@ -13,15 +13,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ASSETS = PROJECT_ROOT / "podcasts" / "assets"
+ASSETS = PROJECT_ROOT / "podcasts" / "the_stack" / "assets"
 
 # Output paths
-RAW_OUTPUT = ASSETS / "the_stack_artwork_raw.png"
-OUTPUT_3000_PNG = ASSETS / "the_stack_artwork_3000.png"
-OUTPUT_3000_JPG = ASSETS / "the_stack_artwork.jpg"
-OUTPUT_1024_PNG = ASSETS / "the_stack_artwork.png"
-FULLPAGE_PNG = ASSETS / "the_stack_fullpage.png"
-FULLPAGE_JPG = ASSETS / "the_stack_fullpage.jpg"
+RAW_OUTPUT = ASSETS / "artwork_raw.png"
+OUTPUT_3000_PNG = ASSETS / "artwork_3000.png"
+OUTPUT_3000_JPG = ASSETS / "artwork.jpg"
+OUTPUT_1024_PNG = ASSETS / "artwork.png"
+FULLPAGE_PNG = ASSETS / "fullpage.png"
+FULLPAGE_JPG = ASSETS / "fullpage.jpg"
 
 # Colors
 BG_COLOR = (10, 15, 10)

@@ -131,7 +131,7 @@ podcasts:
       base_url: "https://podcasts.getpagespeed.com/daily_briefing"
       publish_dir: "./publish/daily_briefing"
       m4a_bitrate: "128k"
-      show_artwork: "./podcasts/assets/daily_briefing_artwork.jpg"
+      show_artwork: "./podcasts/daily_briefing/assets/artwork.jpg"
       show_description: "Daily geopolitics, tech, and science briefing."
       show_category: "News"
       show_subcategory: "Daily News"
