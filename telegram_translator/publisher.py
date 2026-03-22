@@ -414,7 +414,16 @@ footer{{text-align:center;padding:2rem 0;color:#444;font-size:.8rem}}
     <h1>{html.escape(title)}</h1>
     <p>{html.escape(description)}</p>
     <p>Hosted by {html.escape(author)}</p>
-    <a class="subscribe" href="{html.escape(base_url)}/feed.xml">Subscribe via RSS</a>
+    <a id="subscribe-btn" class="subscribe" href="{html.escape(base_url)}/feed.xml">Subscribe via RSS</a>
+    <script>
+    (function(){{
+      if (/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)) {{
+        var a = document.getElementById('subscribe-btn');
+        a.href = a.href.replace(/^https?:\\/\\//, 'podcast://');
+        a.textContent = 'Subscribe';
+      }}
+    }})();
+    </script>
   </header>
   <main>
 {episodes_html}
