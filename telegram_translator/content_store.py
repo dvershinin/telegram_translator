@@ -301,6 +301,7 @@ class ContentStore:
         source_name: Optional[str] = None,
         source_names: Optional[list[str]] = None,
         exclude_used: bool = False,
+        exclude_podcast: Optional[str] = None,
     ) -> list[ContentItem]:
         """Retrieve content items collected since a given time.
 
@@ -309,7 +310,10 @@ class ContentStore:
             source_name: Optional filter by single source.
             source_names: Optional filter by list of sources.
             exclude_used: If True, exclude items already published
-                in a prior episode (any podcast).
+                in a prior episode.
+            exclude_podcast: If set with exclude_used, only exclude
+                items used by this specific podcast. If None, exclude
+                items used by any podcast (global).
 
         Returns:
             List of ContentItem objects.
@@ -322,12 +326,22 @@ class ContentStore:
                 since_str = since.strftime("%Y-%m-%d %H:%M:%S")
 
                 used_filter = ""
+                used_params: list = []
                 if exclude_used:
-                    used_filter = (
-                        " AND id NOT IN ("
-                        "SELECT content_item_id FROM digest_content_items"
-                        ")"
-                    )
+                    if exclude_podcast:
+                        used_filter = (
+                            " AND id NOT IN ("
+                            "SELECT content_item_id FROM digest_content_items"
+                            " WHERE podcast_name = ?"
+                            ")"
+                        )
+                        used_params.append(exclude_podcast)
+                    else:
+                        used_filter = (
+                            " AND id NOT IN ("
+                            "SELECT content_item_id FROM digest_content_items"
+                            ")"
+                        )
 
                 if source_name:
                     cursor.execute(
@@ -337,7 +351,7 @@ class ContentStore:
                         {used_filter}
                         ORDER BY published_at ASC
                         """,
-                        (since_str, source_name),
+                        (since_str, source_name, *used_params),
                     )
                 elif source_names:
                     placeholders = ",".join("?" for _ in source_names)
@@ -349,7 +363,7 @@ class ContentStore:
                         {used_filter}
                         ORDER BY source_name, published_at ASC
                         """,
-                        [since_str, *source_names],
+                        [since_str, *source_names, *used_params],
                     )
                 else:
                     cursor.execute(
@@ -359,7 +373,7 @@ class ContentStore:
                         {used_filter}
                         ORDER BY source_name, published_at ASC
                         """,
-                        (since_str,),
+                        (since_str, *used_params),
                     )
 
                 rows = cursor.fetchall()

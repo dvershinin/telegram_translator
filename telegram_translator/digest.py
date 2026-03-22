@@ -52,8 +52,8 @@ class DigestPipeline:
             self.podcast_configs = all_podcasts
 
     def _today(self) -> str:
-        """Return today's date as YYYY-MM-DD."""
-        return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        """Return today's date as YYYY-MM-DD in local time."""
+        return datetime.now().strftime("%Y-%m-%d")
 
     def _since(self, date: str) -> datetime:
         """Return the content cutoff datetime.
@@ -293,6 +293,7 @@ class DigestPipeline:
                     all_items = self.store.get_content_since(
                         since, source_names=source_filter,
                         exclude_used=True,
+                        exclude_podcast=podcast_name,
                     )
                     all_items = await summarizer.select_content(
                         all_items, selection_prompt,
