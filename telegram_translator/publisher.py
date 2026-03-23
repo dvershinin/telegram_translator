@@ -45,7 +45,7 @@ class PodcastPublisher:
         Raises:
             RuntimeError: If no audio exists or publish config is missing.
         """
-        date = date or datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        date = date or datetime.now().strftime("%Y-%m-%d")
         publish_cfg = self.config.get("publish", {})
 
         if not publish_cfg:
