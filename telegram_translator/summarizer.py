@@ -34,6 +34,17 @@ _DEFAULT_PODCAST_PROMPT = (
     "close with a brief sign-off. Target ~1500 words (roughly 10 minutes)."
 )
 
+_FACTUAL_ACCURACY_GUARDRAIL = (
+    "\n\nFACTUAL ACCURACY: Use your general knowledge to avoid "
+    "mischaracterizing well-known existing products, services, or "
+    'organizations as "new," "upcoming," or "launching." When a source '
+    "describes advertising, marketing campaigns, or increased public "
+    "visibility for something, do not assume it is a new product launch — "
+    "it is likely a campaign for an existing offering. Only call something "
+    '"new" if the source explicitly states it was just created or '
+    "announced for the first time."
+)
+
 
 class Summarizer:
     """Generate summaries and podcast scripts using an LLM."""
@@ -344,7 +355,7 @@ class Summarizer:
             f"{source_prompt or ''} "
             "Produce a concise but thorough summary of the key developments. "
             "Use bullet points for individual items. "
-            f"Write in English.{bias_context}"
+            f"Write in English.{bias_context}{_FACTUAL_ACCURACY_GUARDRAIL}"
         )
 
         user = (
@@ -417,6 +428,10 @@ class Summarizer:
             "in the source summaries. Do NOT invent categories or mention "
             "that a topic area had no developments. If a topic has no "
             "content, simply omit it."
+            "\n\nAlso, use your general knowledge to verify claims about "
+            "product or service launches. Do not describe well-known "
+            'existing products as "new" or "upcoming" just because sources '
+            "mention advertising or marketing activity for them."
         )
         system = (prompt or self.executive_prompt) + bias_block + guardrail
 
