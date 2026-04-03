@@ -297,6 +297,7 @@ class PodcastPublisher:
         artwork_url = self._thumbnail_url(base_url)
         author = self.config.get("host_name", "")
         copyright_text = publish_cfg.get("copyright", "")
+        spotify_url = publish_cfg.get("spotify_url", "")
 
         sorted_eps = sorted(
             episodes,
@@ -416,7 +417,10 @@ footer{{text-align:center;padding:2rem 0;color:#444;font-size:.8rem}}
     <h1>{html.escape(title)}</h1>
     <p>{html.escape(description)}</p>
     <p>Hosted by {html.escape(author)}</p>
-    <a id="subscribe-btn" class="subscribe" href="{html.escape(base_url)}/feed.xml">Subscribe via RSS</a>
+    <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:.5rem">
+      <a id="subscribe-btn" class="subscribe" href="{html.escape(base_url)}/feed.xml">Subscribe via RSS</a>
+{"      <a class=\"subscribe\" href=\"" + html.escape(spotify_url) + "\">Listen on Spotify</a>" if spotify_url else ""}
+    </div>
     <script>
     (function(){{
       if (/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)) {{
