@@ -213,6 +213,8 @@ class PodcastFeed:
         explicit: bool = False,
         feed_url: str = "",
         copyright_text: str = "",
+        owner_name: str = "",
+        owner_email: str = "",
     ):
         """Initialize the feed generator.
 
@@ -228,6 +230,8 @@ class PodcastFeed:
             explicit: Whether the show contains explicit content.
             feed_url: Canonical feed URL for atom:link rel="self".
             copyright_text: Copyright notice text.
+            owner_name: Show owner name for itunes:owner.
+            owner_email: Show owner email for itunes:owner.
         """
         self.title = title
         self.base_url = base_url.rstrip("/")
@@ -240,6 +244,8 @@ class PodcastFeed:
         self.explicit = explicit
         self.feed_url = feed_url or f"{self.base_url}/feed.xml"
         self.copyright_text = copyright_text
+        self.owner_name = owner_name
+        self.owner_email = owner_email
 
     def generate(
         self,
@@ -294,6 +300,12 @@ class PodcastFeed:
         )
         if self.copyright_text:
             SubElement(channel, "copyright").text = self.copyright_text
+
+        if self.owner_email:
+            owner = SubElement(channel, f"{{{ITUNES_NS}}}owner")
+            if self.owner_name:
+                SubElement(owner, f"{{{ITUNES_NS}}}name").text = self.owner_name
+            SubElement(owner, f"{{{ITUNES_NS}}}email").text = self.owner_email
 
         # Atom self-link (PSP-1 best practice, harmless for Apple)
         SubElement(

@@ -40,6 +40,8 @@ def feed():
         explicit=False,
         feed_url="https://example.com/podcast/feed.xml",
         copyright_text="© 2024 Test LLC",
+        owner_name="Test Owner",
+        owner_email="owner@example.com",
     )
 
 
@@ -139,10 +141,14 @@ class TestShowLevelTags:
         assert "podcast:locked" not in xml_text
         assert "podcast:medium" not in xml_text
 
-    def test_no_itunes_owner(self, feed_xml):
-        """itunes:owner is deprecated since Aug 2022."""
-        xml_text, _, _ = feed_xml
-        assert "itunes:owner" not in xml_text
+    def test_itunes_owner(self, feed_xml):
+        """itunes:owner is required by Spotify for Creators."""
+        _, root, _ = feed_xml
+        ns = {"itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd"}
+        owner = root.find(".//channel/itunes:owner", ns)
+        assert owner is not None
+        assert owner.find("itunes:name", ns).text == "Test Owner"
+        assert owner.find("itunes:email", ns).text == "owner@example.com"
 
 
 class TestEpisodeLevelTags:

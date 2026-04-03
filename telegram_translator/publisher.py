@@ -230,6 +230,8 @@ class PodcastPublisher:
             explicit=publish_cfg.get("explicit", False),
             feed_url=f"{base_url}/feed.xml",
             copyright_text=publish_cfg.get("copyright", ""),
+            owner_name=publish_cfg.get("owner_name", ""),
+            owner_email=publish_cfg.get("owner_email", ""),
         )
 
         # Query all published episodes
