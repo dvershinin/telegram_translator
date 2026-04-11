@@ -15,6 +15,36 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+# Russian enclitic particles that must glue to their host word so TTS
+# does not stress them as separate words. Matches a Cyrillic letter,
+# a hyphen, and one of the listed particles at a word boundary.
+# Example: ``какая-то`` → ``какаята`` (correct clitic prosody).
+# Leaves non-clitic hyphen cases alone: ``Ростов-на-Дону``,
+# ``по-русски``, ``2026-04-11``, ``что-что``, ``AI-фигня``.
+_RU_CLITIC_RE = re.compile(
+    r"([а-яёА-ЯЁ])-(то|нибудь|либо|ка|таки)\b"
+)
+
+
+def _glue_ru_clitics(text: str) -> str:
+    """Glue Russian clitic particles to their host word for cleaner TTS.
+
+    Russian TTS models treat a hyphen as a word break and give the
+    clitic particle (``-то``, ``-нибудь``, ``-либо``, ``-ка``,
+    ``-таки``) its own primary stress, which sounds wrong. Writing the
+    particle glued to the host word (``какаята`` instead of
+    ``какая-то``) cues the model to produce the correct unstressed
+    clitic prosody.
+
+    Args:
+        text: Input text (Russian or mixed).
+
+    Returns:
+        Text with clitic particles glued to their host words.
+    """
+    return _RU_CLITIC_RE.sub(r"\1\2", text)
+
+
 def split_script(text: str, max_chars: int = 500) -> list[str]:
     """Split a podcast script into segments at sentence boundaries.
 
@@ -503,6 +533,15 @@ class PodcastGenerator:
             )
 
         for profile in profiles:
+            if profile.get("id") == self.voice_profile_name:
+                self._profile_id = profile["id"]
+                logger.info(
+                    "Resolved voice profile by id '%s'",
+                    self._profile_id,
+                )
+                return self._profile_id
+
+        for profile in profiles:
             if profile.get("name", "").lower() == self.voice_profile_name.lower():
                 self._profile_id = profile["id"]
                 logger.info(
@@ -550,6 +589,11 @@ class PodcastGenerator:
         Raises:
             RuntimeError: If generation fails.
         """
+        # Phonetic respell for Russian: glue clitic particles to host
+        # words so the TTS produces correct unstressed prosody.
+        # No-op for non-Russian text (regex won't match Latin).
+        text = _glue_ru_clitics(text)
+
         # Check TTS cache
         cached = self._tts_cache_path(text)
         if cached and cached.exists():
@@ -602,6 +646,19 @@ class PodcastGenerator:
 
                 return output_path
 
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response is not None else ""
+            logger.error(
+                "Voicebox %d on segment (%d chars): %s | body=%s | text=%r",
+                e.response.status_code if e.response is not None else 0,
+                len(text),
+                e,
+                body,
+                text,
+            )
+            raise RuntimeError(
+                f"Voicebox generation failed for segment: {body}"
+            )
         except httpx.HTTPError:
             logger.error("Voicebox request failed", exc_info=True)
             raise RuntimeError(

@@ -97,14 +97,19 @@ class Summarizer:
             "podcast_prompt", _DEFAULT_PODCAST_PROMPT
         )
 
-        api_key = os.getenv("OPENAI_API_KEY") or config.get("api_key")
+        api_key_env = config.get("api_key_env") or "OPENAI_API_KEY"
+        api_key = os.getenv(api_key_env) or config.get("api_key")
         if not api_key:
             raise ValueError(
-                "OpenAI API key required for summarization. "
-                "Set OPENAI_API_KEY or add api_key to digest config."
+                f"API key required for summarization. "
+                f"Set {api_key_env} or add api_key to podcast config."
             )
 
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+        self.api_base = config.get("api_base")
+        self.client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url=self.api_base or None,
+        )
 
     def _make_cache_key(
         self,
@@ -490,6 +495,12 @@ class Summarizer:
             "content only — no markdown, no formatting, no asterisks). "
             "Don't set a topic for the opening greeting or closing sign-off."
         )
+        if self.api_base:
+            raw_prompt += (
+                "\n\nReturn a JSON object with this exact shape and nothing "
+                'else: {{"sections": [{{"topic": string|null, "text": '
+                'string}}, ...]}}. No prose before or after the JSON.'
+            )
         template_vars = defaultdict(
             str,
             title=self.title,
@@ -523,15 +534,10 @@ class Summarizer:
                 logger.info("Cache hit for script, skipping API call")
                 return cached
 
-        response = await self.client.chat.completions.create(
-            model=use_model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            max_tokens=8192,
-            temperature=0.7,
-            response_format={
+        if self.api_base:
+            response_format = {"type": "json_object"}
+        else:
+            response_format = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "podcast_script",
@@ -569,7 +575,17 @@ class Summarizer:
                         "additionalProperties": False,
                     },
                 },
-            },
+            }
+
+        response = await self.client.chat.completions.create(
+            model=use_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=8192,
+            temperature=0.7,
+            response_format=response_format,
         )
         result = response.choices[0].message.content.strip()
 

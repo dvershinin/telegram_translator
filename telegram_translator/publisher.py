@@ -3,6 +3,7 @@
 import html
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -91,6 +92,30 @@ summary:hover{color:#aaa}
 .podcast-card .actions a:hover{color:#6cb4ee;border-color:#6cb4ee;text-decoration:none}
 footer{text-align:center;padding:2rem 0;color:#444;font-size:.8rem}
 """
+
+
+_RU_MONTHS = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def _format_episode_date(date: str, language: str) -> str:
+    """Format an ISO date for use in an episode title.
+
+    Args:
+        date: ISO ``YYYY-MM-DD`` string.
+        language: ISO 639-1 language code from the podcast config.
+
+    Returns:
+        Localized human-readable date. Russian (``"11 апреля 2026"``)
+        when ``language`` starts with ``"ru"``, otherwise English
+        (``"April 11, 2026"``).
+    """
+    dt = datetime.strptime(date, "%Y-%m-%d")
+    if language.lower().startswith("ru"):
+        return f"{dt.day} {_RU_MONTHS[dt.month - 1]} {dt.year}"
+    return dt.strftime("%B %d, %Y")
 
 
 class PodcastPublisher:
@@ -213,9 +238,9 @@ class PodcastPublisher:
         bitrate = publish_cfg.get("m4a_bitrate", "128k")
 
         title = self.config.get("title", podcast_name)
-        formatted_date = datetime.strptime(
-            date, "%Y-%m-%d"
-        ).strftime("%B %d, %Y")
+        formatted_date = _format_episode_date(
+            date, self.config.get("language", "en")
+        )
         metadata = {
             "title": f"{title} \u2014 {formatted_date}",
             "artist": self.config.get("host_name", ""),
@@ -316,9 +341,9 @@ class PodcastPublisher:
         bitrate = publish_cfg.get("m4a_bitrate", "128k")
 
         title = self.config.get("title", podcast_name)
-        formatted_date = datetime.strptime(
-            date, "%Y-%m-%d"
-        ).strftime("%B %d, %Y")
+        formatted_date = _format_episode_date(
+            date, self.config.get("language", "en")
+        )
         metadata = {
             "title": f"{title} \u2014 {formatted_date}",
             "artist": self.config.get("host_name", ""),
@@ -330,18 +355,24 @@ class PodcastPublisher:
             wav_path, m4a_path, bitrate, metadata
         )
 
-        # Copy show artwork into public tree
+        # Copy show artwork into public tree — one-time only. Re-copying
+        # on every run churns the Astro content-image hash and forces a
+        # needless deploy, so gate on target-missing. Per the Vaske
+        # contract: artwork at public/podcast/artwork.jpg is a one-time
+        # setup, not per-episode.
         artwork_src = publish_cfg.get("show_artwork")
         if artwork_src:
             artwork_src_path = Path(artwork_src)
             if artwork_src_path.exists():
-                shutil.copy2(
-                    artwork_src_path,
-                    public_dir_path / artwork_src_path.name,
-                )
-                self._generate_thumbnail(
-                    artwork_src_path, public_dir_path
-                )
+                artwork_dst = public_dir_path / artwork_src_path.name
+                thumb_dst = public_dir_path / "artwork_thumb.jpg"
+                if not artwork_dst.exists():
+                    shutil.copy2(artwork_src_path, artwork_dst)
+                    logger.info("Copied artwork: %s", artwork_dst)
+                if not thumb_dst.exists():
+                    self._generate_thumbnail(
+                        artwork_src_path, public_dir_path
+                    )
 
         # Update digest record so subsequent publishes/feeds see it
         self.store.update_digest(
@@ -446,9 +477,17 @@ class PodcastPublisher:
             "---\n\n"
         )
 
-        ep_path.write_text(
+        # Atomic write: Vaske's RSS build (feed.xml.ts) calls fs.statSync
+        # on the .m4a file via ep.data.audioUrl at RSS render time. If the
+        # .md lands before the .m4a (or lands half-written), the build
+        # fails. We already write .m4a first in _publish_astro; use
+        # tmp+rename here so the .md appears atomically only after it is
+        # fully written.
+        tmp_path = ep_path.with_suffix(ep_path.suffix + ".tmp")
+        tmp_path.write_text(
             frontmatter + (executive_summary or ""), encoding="utf-8"
         )
+        os.replace(tmp_path, ep_path)
         logger.info("Wrote Astro episode: %s", ep_path)
         return ep_path
 
@@ -844,6 +883,48 @@ class PodcastPublisher:
             index_path,
         )
         return index_path
+
+    @staticmethod
+    def wipe_astro_cache(destination_cfg: dict) -> None:
+        """Wipe ``.astro`` and ``dist`` from the Astro project root.
+
+        Required before running an ``astro_collection`` destination's
+        ``sync_command`` so Astro's content data store cannot keep
+        serving stale entries for episodes that were replaced or
+        removed in this run. Safe for pure append-only flows too (cost:
+        one cold build). No-op for non-astro destinations or when the
+        destination is missing ``content_dir``/``public_dir``.
+
+        Args:
+            destination_cfg: Resolved destination config dict.
+        """
+        if destination_cfg.get("type") != "astro_collection":
+            return
+        content_dir = destination_cfg.get("content_dir")
+        public_dir = destination_cfg.get("public_dir")
+        if not content_dir or not public_dir:
+            return
+        try:
+            project_root = Path(
+                os.path.commonpath([str(content_dir), str(public_dir)])
+            )
+        except ValueError:
+            logger.warning(
+                "wipe_astro_cache: content_dir and public_dir have no "
+                "common path (%s / %s) — skipping",
+                content_dir, public_dir,
+            )
+            return
+        for sub in (".astro", "dist"):
+            target = project_root / sub
+            if target.exists():
+                try:
+                    shutil.rmtree(target)
+                    logger.info("Wiped Astro cache: %s", target)
+                except OSError as e:
+                    logger.error(
+                        "Failed to wipe Astro cache %s: %s", target, e,
+                    )
 
     @staticmethod
     def run_destination_sync(

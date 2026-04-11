@@ -611,6 +611,12 @@ def digest_publish(date, podcast_name):
                 )
                 if index_path:
                     click.echo(f"Site index: {dest_name} -> {index_path}")
+            elif dest_cfg.get("type") == "astro_collection":
+                # Wipe Astro's content data store + dist/ so the next
+                # build cannot serve stale episodes. Required whenever
+                # an episode is replaced; harmless otherwise.
+                PodcastPublisher.wipe_astro_cache(dest_cfg)
+                click.echo(f"Wiped Astro cache: {dest_name}")
 
             ok = PodcastPublisher.run_destination_sync(dest_name, dest_cfg)
             if ok:

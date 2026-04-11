@@ -422,6 +422,8 @@ class ConfigManager:
             "voice_profile": cfg.get("voice_profile", "default"),
             "language": cfg.get("language", "en"),
             "model": cfg.get("model", "gpt-4o"),
+            "api_base": cfg.get("api_base"),
+            "api_key_env": cfg.get("api_key_env"),
             "executive_prompt": cfg.get("executive_prompt", ""),
             "podcast_prompt": cfg.get("podcast_prompt", ""),
             "voicebox_url": cfg.get(
