@@ -60,6 +60,10 @@ telegram-translator digest status --date 2026-03-20   # Show digest status
 
 Use `/podcast [name]` skill to run the full pipeline interactively — it handles secrets, Voicebox checks, all steps, and verification. See `.claude/skills/podcast/SKILL.md`.
 
+## Scheduled Runs
+
+Daily cron (`crontab -l`) runs `scripts/daily_podcasts.sh` at `0 4 * * *` (04:00 local). The script uses `set -eo pipefail`, so a failure in any stage aborts the rest — podcasts run sequentially and the order determines blast radius. Current order: `crosswire` → `the_stack` → `vaske_daily` (Russian last so English episodes still ship if the Russian pipeline errors out). Each podcast runs `summarize` → `podcast` → `publish`. `digest collect` runs once up front (sources are shared).
+
 ## Voicebox Integration
 
 - API at `http://localhost:17493` (configurable per-podcast via `voicebox.url`)
@@ -69,6 +73,7 @@ Use `/podcast [name]` skill to run the full pipeline interactively — it handle
 - Scripts split at 500-char sentence boundaries, ~13 segments for a 6-min podcast
 - Total generation time: ~90 minutes for a full podcast
 - Backend: `cd ~/Projects/voicebox && backend/venv/bin/uvicorn backend.main:app --port 17493`
+- `voice_profile` accepts either a profile name or a profile UUID. `PodcastGenerator._get_profile_id` tries UUID match first, then case-insensitive name match — pin immutable UUIDs in config when the profile's name might change.
 
 ## Audio Assembly
 
@@ -226,6 +231,17 @@ The summarizer injects guardrails into both the executive summary and podcast sc
 - **Script stage**: "Never mention that a topic had no news or was quiet. Only discuss topics present in the summary."
 
 These prevent the LLM from generating filler about empty categories (e.g., "Science was quiet today..."), regardless of what the user-configured prompt says.
+
+## LLM Providers (OpenAI-Compatible)
+
+Each podcast can route its LLM calls through any OpenAI-compatible endpoint via two optional config keys:
+
+- `api_base` — overrides the default OpenAI endpoint (e.g. `https://api.deepseek.com`)
+- `api_key_env` — env var name holding the provider's API key (default `OPENAI_API_KEY`)
+
+`vaske_daily` uses this to run everything through **DeepSeek** (`deepseek-chat`, env var `DEEPSEEK_API_KEY_PODCAST_MACHINE`) because OpenAI softens Russian profanity the Lebedev-tone script requires.
+
+**DeepSeek quirk**: it supports `response_format: {"type": "json_object"}` but **not** `json_schema`. `summarizer.generate_podcast_script` branches on `self.api_base`: when set, it emits `json_object` mode with the schema described in-prompt; when unset, it uses OpenAI's strict `json_schema` path. Cache keys hash the full system+user+model, so a prompt or model change auto-invalidates stored LLM responses — no manual `--no-cache` needed.
 
 ## Structured Script Output
 
