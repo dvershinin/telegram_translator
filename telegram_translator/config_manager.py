@@ -2,10 +2,16 @@ import yaml
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from appdirs import user_data_dir, user_config_dir
 
 logger = logging.getLogger(__name__)
+
+# Keys that a destination-scoped podcast must NOT set in its per-podcast
+# ``publish:`` block — they come from the destination.
+_FORBIDDEN_PODCAST_PUBLISH_KEYS = ("base_url", "publish_dir", "sync_command")
+
+_VALID_DESTINATION_TYPES = ("static", "astro_collection")
 
 class ConfigManager:
     """Manages configuration for the Telegram Translator app"""
@@ -146,26 +152,185 @@ class ConfigManager:
             'podcasts_dir': str(self.podcasts_dir),
         }
     
+    def resolve_destinations(self) -> Dict[str, Dict[str, Any]]:
+        """Resolve all publish destinations.
+
+        Parses the top-level ``destinations:`` section and normalizes each
+        entry: defaults ``type`` to ``static``, strips trailing slashes from
+        ``base_url``, and expands ``~`` in directory paths.
+
+        Returns:
+            Dict mapping destination name to its resolved config dict.
+
+        Raises:
+            ValueError: If a destination has an unknown ``type`` or is
+                missing required keys for its type.
+        """
+        raw = self.config.get("destinations") or {}
+        resolved: Dict[str, Dict[str, Any]] = {}
+
+        for name, cfg in raw.items():
+            if not isinstance(cfg, dict):
+                raise ValueError(
+                    f"Destination '{name}' must be a mapping, "
+                    f"got {type(cfg).__name__}"
+                )
+
+            dest_type = cfg.get("type", "static")
+            if dest_type not in _VALID_DESTINATION_TYPES:
+                raise ValueError(
+                    f"Destination '{name}' has invalid type "
+                    f"'{dest_type}'. Must be one of: "
+                    f"{', '.join(_VALID_DESTINATION_TYPES)}"
+                )
+
+            base_url = str(cfg.get("base_url", "")).rstrip("/")
+            sync_command = cfg.get("sync_command", "")
+
+            entry: Dict[str, Any] = {
+                "name": name,
+                "type": dest_type,
+                "base_url": base_url,
+                "sync_command": sync_command,
+            }
+
+            if dest_type == "static":
+                publish_dir = cfg.get("publish_dir")
+                if not publish_dir:
+                    raise ValueError(
+                        f"Static destination '{name}' requires "
+                        f"'publish_dir'"
+                    )
+                entry["publish_dir"] = str(
+                    Path(publish_dir).expanduser()
+                )
+                entry["site_title"] = cfg.get("site_title", "")
+                entry["site_description"] = cfg.get(
+                    "site_description", ""
+                )
+                entry["copyright"] = cfg.get("copyright", "")
+            else:  # astro_collection
+                content_dir = cfg.get("content_dir")
+                public_dir = cfg.get("public_dir")
+                if not content_dir or not public_dir:
+                    raise ValueError(
+                        f"astro_collection destination '{name}' "
+                        f"requires both 'content_dir' and 'public_dir'"
+                    )
+                entry["content_dir"] = str(
+                    Path(content_dir).expanduser()
+                )
+                entry["public_dir"] = str(
+                    Path(public_dir).expanduser()
+                )
+
+            resolved[name] = entry
+
+        return resolved
+
     def resolve_podcast_configs(self) -> Dict[str, Dict[str, Any]]:
         """Resolve all podcast configurations.
 
         If a ``podcasts`` section exists in config, each entry is resolved
-        against the global ``sources`` pool.  Otherwise, a single
-        ``_default`` podcast is synthesised from the legacy flat
-        ``digest`` + ``podcast`` sections.
+        against the global ``sources`` pool and any referenced destination.
+        Otherwise, a single ``_default`` podcast is synthesised from the
+        legacy flat ``digest`` + ``podcast`` sections.
 
         Returns:
             Dict mapping podcast name to its fully resolved config.
+
+        Raises:
+            ValueError: If any destination reference or slug layout is
+                invalid.
         """
         podcasts_raw = self.config.get("podcasts")
-        if podcasts_raw:
-            return {
-                name: self._resolve_single_podcast(name, cfg)
-                for name, cfg in podcasts_raw.items()
-            }
+        if not podcasts_raw:
+            # Legacy fallback: synthesise _default from flat sections
+            return {"_default": self._build_legacy_podcast_config()}
 
-        # Legacy fallback: synthesise _default from flat sections
-        return {"_default": self._build_legacy_podcast_config()}
+        destinations = self.resolve_destinations()
+        resolved = {
+            name: self._resolve_single_podcast(name, cfg, destinations)
+            for name, cfg in podcasts_raw.items()
+        }
+
+        self._validate_destination_grouping(resolved, destinations)
+        return resolved
+
+    def group_podcasts_by_destination(
+        self,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Group destination-scoped podcasts by destination name.
+
+        Returns:
+            Dict mapping destination name to the list of resolved podcast
+            config dicts assigned to that destination. Legacy podcasts
+            without a ``destination_name`` are excluded.
+        """
+        all_podcasts = self.resolve_podcast_configs()
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for cfg in all_podcasts.values():
+            dest_name = cfg.get("destination_name")
+            if not dest_name:
+                continue
+            groups.setdefault(dest_name, []).append(cfg)
+        return groups
+
+    def _validate_destination_grouping(
+        self,
+        resolved: Dict[str, Dict[str, Any]],
+        destinations: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Validate destination grouping invariants.
+
+        Ensures that:
+        - Each ``astro_collection`` destination has at most one podcast.
+        - Each ``static`` destination either has exactly one root-mounted
+          podcast (slug ``""``) or 1+ subpath podcasts, never a mix.
+
+        Args:
+            resolved: All resolved podcast configs keyed by podcast name.
+            destinations: All resolved destination configs keyed by name.
+
+        Raises:
+            ValueError: If any invariant is violated.
+        """
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for cfg in resolved.values():
+            dest_name = cfg.get("destination_name")
+            if dest_name:
+                groups.setdefault(dest_name, []).append(cfg)
+
+        for dest_name, podcasts in groups.items():
+            dest_type = destinations[dest_name]["type"]
+
+            if dest_type == "astro_collection" and len(podcasts) > 1:
+                names = ", ".join(p["name"] for p in podcasts)
+                raise ValueError(
+                    f"astro_collection destination '{dest_name}' can "
+                    f"host only one podcast, got {len(podcasts)}: "
+                    f"{names}"
+                )
+
+            if dest_type == "static":
+                root = [p for p in podcasts if p.get("slug") == ""]
+                sub = [p for p in podcasts if p.get("slug")]
+                if root and sub:
+                    root_names = ", ".join(p["name"] for p in root)
+                    sub_names = ", ".join(p["name"] for p in sub)
+                    raise ValueError(
+                        f"Static destination '{dest_name}' cannot mix "
+                        f"root-mounted and subpath podcasts. "
+                        f"Root-mounted: {root_names}. "
+                        f"Subpath: {sub_names}."
+                    )
+                if len(root) > 1:
+                    names = ", ".join(p["name"] for p in root)
+                    raise ValueError(
+                        f"Static destination '{dest_name}' has "
+                        f"multiple root-mounted podcasts "
+                        f"(slug=''): {names}"
+                    )
 
     def get_podcast_config(self, name: str) -> Dict[str, Any]:
         """Return the resolved config for a single podcast.
@@ -188,16 +353,32 @@ class ConfigManager:
         return all_podcasts[name]
 
     def _resolve_single_podcast(
-        self, name: str, cfg: Dict[str, Any]
+        self,
+        name: str,
+        cfg: Dict[str, Any],
+        destinations: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Resolve a single podcast entry against the global source pool.
+
+        If the raw config references a destination, merge destination-level
+        keys (``base_url``, ``publish_dir`` / ``content_dir`` / ``public_dir``,
+        ``sync_command``) into the resolved ``publish`` dict according to the
+        destination's ``type``.
 
         Args:
             name: Podcast key name.
             cfg: Raw podcast config dict from YAML.
+            destinations: Resolved destinations map (from
+                ``resolve_destinations``). If omitted, destination references
+                are ignored.
 
         Returns:
             Fully resolved podcast config.
+
+        Raises:
+            ValueError: If the podcast references an unknown destination or
+                its ``publish:`` block contains forbidden destination-level
+                keys.
         """
         global_sources = self.config.get("sources", {})
         global_telegram = global_sources.get("telegram", {})
@@ -223,6 +404,10 @@ class ConfigManager:
             Path(__file__).resolve().parent.parent / "podcasts" / "assets"
         )
         audio_cfg = cfg.get("audio", {})
+
+        publish_dict, destination_name, destination_type, slug = (
+            self._resolve_publish_section(name, cfg, destinations)
+        )
 
         return {
             "name": name,
@@ -276,8 +461,90 @@ class ConfigManager:
             "pause_between_segments_ms": int(
                 cfg.get("pause_between_segments_ms", 800)
             ),
-            "publish": cfg.get("publish", {}),
+            "publish": publish_dict,
+            "destination_name": destination_name,
+            "destination_type": destination_type,
+            "slug": slug,
         }
+
+    def _resolve_publish_section(
+        self,
+        name: str,
+        cfg: Dict[str, Any],
+        destinations: Optional[Dict[str, Dict[str, Any]]],
+    ) -> tuple[Dict[str, Any], Optional[str], Optional[str], Optional[str]]:
+        """Resolve the publish dict for a podcast, honoring destination refs.
+
+        Args:
+            name: Podcast key name.
+            cfg: Raw podcast config dict.
+            destinations: Resolved destinations map, or None to skip
+                destination handling.
+
+        Returns:
+            A 4-tuple ``(publish_dict, destination_name, destination_type,
+            slug)``. ``destination_name``, ``destination_type``, and ``slug``
+            are ``None`` for legacy podcasts without a ``destination:`` key.
+
+        Raises:
+            ValueError: If the podcast references an unknown destination or
+                its ``publish:`` block contains forbidden destination-level
+                keys.
+        """
+        raw_publish = dict(cfg.get("publish") or {})
+        dest_ref = cfg.get("destination")
+
+        if not dest_ref:
+            return raw_publish, None, None, None
+
+        if destinations is None or dest_ref not in destinations:
+            available = list(destinations.keys()) if destinations else []
+            raise ValueError(
+                f"Podcast '{name}' references unknown destination "
+                f"'{dest_ref}'. Available: {available}"
+            )
+
+        # Forbid destination-level keys inside the podcast publish block
+        forbidden_present = [
+            k for k in _FORBIDDEN_PODCAST_PUBLISH_KEYS if k in raw_publish
+        ]
+        if forbidden_present:
+            raise ValueError(
+                f"Podcast '{name}' is destination-scoped "
+                f"(destination='{dest_ref}') and must not set "
+                f"{forbidden_present} inside its 'publish:' block — "
+                f"these are provided by the destination."
+            )
+
+        dest = destinations[dest_ref]
+        dest_type = dest["type"]
+        base_url = dest["base_url"]
+
+        if dest_type == "static":
+            slug_raw = cfg.get("slug")
+            slug = name if slug_raw is None else str(slug_raw)
+            if slug:
+                derived_base_url = f"{base_url}/{slug}"
+                derived_publish_dir = str(
+                    Path(dest["publish_dir"]) / slug
+                )
+            else:
+                derived_base_url = base_url
+                derived_publish_dir = dest["publish_dir"]
+
+            publish = dict(raw_publish)
+            publish["base_url"] = derived_base_url
+            publish["publish_dir"] = derived_publish_dir
+            publish["sync_command"] = dest.get("sync_command", "")
+            return publish, dest_ref, dest_type, slug
+
+        # astro_collection
+        publish = dict(raw_publish)
+        publish["base_url"] = base_url
+        publish["content_dir"] = dest["content_dir"]
+        publish["public_dir"] = dest["public_dir"]
+        publish["sync_command"] = dest.get("sync_command", "")
+        return publish, dest_ref, dest_type, None
 
     def _build_legacy_podcast_config(self) -> Dict[str, Any]:
         """Build a _default podcast config from legacy flat sections.
@@ -331,6 +598,9 @@ class ConfigManager:
                 podcast_cfg.get("pause_between_segments_ms", 800)
             ),
             "publish": {},
+            "destination_name": None,
+            "destination_type": None,
+            "slug": None,
         }
 
     def print_app_info(self):

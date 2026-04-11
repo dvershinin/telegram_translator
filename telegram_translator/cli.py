@@ -486,8 +486,20 @@ def digest_podcasts():
         title = cfg.get("title", name)
         sources = cfg.get("source_names", [])
         voice = cfg.get("voice_profile", "?")
+        dest_name = cfg.get("destination_name")
+        dest_type = cfg.get("destination_type")
+        slug = cfg.get("slug")
+
         click.echo(f"  {name}: {title}")
         click.echo(f"    Voice: {voice}, Sources: {', '.join(sources)}")
+        if dest_name:
+            slug_display = (
+                f" slug='{slug}'" if slug not in (None, "") else
+                " slug='' (root-mounted)" if slug == "" else ""
+            )
+            click.echo(
+                f"    Destination: {dest_name} ({dest_type}){slug_display}"
+            )
 
 
 @digest.group(name="cache")
@@ -519,6 +531,43 @@ def digest_cache_clear():
         click.echo("TTS cache directory not found (nothing to clear)")
 
 
+def _group_touched_destinations(
+    targets: dict,
+    all_podcasts: dict,
+    destinations: dict,
+) -> dict:
+    """Group touched podcasts by destination name.
+
+    Used by digest publish and digest feed to run destination-level
+    operations (site index, sync) once per destination after the
+    per-podcast loop.
+
+    Args:
+        targets: Dict of podcasts touched by the current run, keyed by
+            podcast name.
+        all_podcasts: Full resolved podcast config map (used to see all
+            podcasts on a touched destination, not just the targeted
+            subset — so the site index lists every podcast, not just the
+            rebuilt ones).
+        destinations: Resolved destination configs.
+
+    Returns:
+        Dict mapping destination name to list of full resolved podcast
+        configs on that destination.
+    """
+    touched_dest_names = {
+        cfg.get("destination_name")
+        for cfg in targets.values()
+        if cfg.get("destination_name")
+    }
+    groups: dict[str, list] = {}
+    for pname, pcfg in all_podcasts.items():
+        dest = pcfg.get("destination_name")
+        if dest and dest in touched_dest_names:
+            groups.setdefault(dest, []).append(pcfg)
+    return groups
+
+
 @digest.command(name="publish")
 @click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
 @click.option("--podcast", "podcast_name", default=None, help="Podcast name (publishes all if omitted)")
@@ -533,6 +582,7 @@ def digest_publish(date, podcast_name):
         store = ContentStore(db_path)
 
         all_podcasts = config_mgr.resolve_podcast_configs()
+        destinations = config_mgr.resolve_destinations()
         if podcast_name:
             if podcast_name not in all_podcasts:
                 raise click.ClickException(
@@ -547,6 +597,26 @@ def digest_publish(date, podcast_name):
             publisher = PodcastPublisher(pcfg, store)
             m4a_path = await publisher.publish(pname, date)
             click.echo(f"Published: {pname} -> {m4a_path}")
+
+        # Destination-level: rebuild site index + run destination sync
+        # exactly once per destination touched by this run.
+        groups = _group_touched_destinations(
+            targets, all_podcasts, destinations
+        )
+        for dest_name, dest_podcasts in groups.items():
+            dest_cfg = destinations[dest_name]
+            if dest_cfg.get("type") == "static":
+                index_path = PodcastPublisher.build_static_site_index(
+                    dest_name, dest_cfg, dest_podcasts, store
+                )
+                if index_path:
+                    click.echo(f"Site index: {dest_name} -> {index_path}")
+
+            ok = PodcastPublisher.run_destination_sync(dest_name, dest_cfg)
+            if ok:
+                click.echo(f"Sync complete: {dest_name}")
+            else:
+                click.echo(f"Sync failed: {dest_name}", err=True)
 
     asyncio.run(_run())
 
@@ -563,6 +633,7 @@ def digest_feed(podcast_name):
     store = ContentStore(db_path)
 
     all_podcasts = config_mgr.resolve_podcast_configs()
+    destinations = config_mgr.resolve_destinations()
     if podcast_name:
         if podcast_name not in all_podcasts:
             raise click.ClickException(
@@ -574,9 +645,80 @@ def digest_feed(podcast_name):
         targets = all_podcasts
 
     for pname, pcfg in targets.items():
+        if pcfg.get("destination_type") == "astro_collection":
+            # astro_collection destinations have no RSS feed of their own;
+            # the downstream Astro build handles it.
+            click.echo(
+                f"Skipped (astro_collection): {pname}"
+            )
+            continue
         publisher = PodcastPublisher(pcfg, store)
         feed_path = publisher.rebuild_feed(pname)
         click.echo(f"Feed rebuilt: {pname} -> {feed_path}")
+
+    # Rebuild site index for any static destination touched by this run.
+    groups = _group_touched_destinations(
+        targets, all_podcasts, destinations
+    )
+    for dest_name, dest_podcasts in groups.items():
+        dest_cfg = destinations[dest_name]
+        if dest_cfg.get("type") != "static":
+            continue
+        index_path = PodcastPublisher.build_static_site_index(
+            dest_name, dest_cfg, dest_podcasts, store
+        )
+        if index_path:
+            click.echo(f"Site index: {dest_name} -> {index_path}")
+
+
+@digest.command(name="site")
+@click.option(
+    "--destination",
+    "destination_name",
+    default=None,
+    help="Destination name (rebuilds all if omitted)",
+)
+def digest_site(destination_name):
+    """Rebuild the root site index for a static destination."""
+    from telegram_translator.publisher import PodcastPublisher
+
+    config_mgr = ConfigManager()
+    db_path = config_mgr.get_database_path("content_store.db")
+    from telegram_translator.content_store import ContentStore
+    store = ContentStore(db_path)
+
+    destinations = config_mgr.resolve_destinations()
+    if destination_name:
+        if destination_name not in destinations:
+            raise click.ClickException(
+                f"Unknown destination '{destination_name}'. "
+                f"Available: {list(destinations.keys())}"
+            )
+        target_dests = {destination_name: destinations[destination_name]}
+    else:
+        target_dests = destinations
+
+    groups = config_mgr.group_podcasts_by_destination()
+
+    for dest_name, dest_cfg in target_dests.items():
+        if dest_cfg.get("type") != "static":
+            click.echo(
+                f"Skipped (non-static): {dest_name}"
+            )
+            continue
+        dest_podcasts = groups.get(dest_name, [])
+        if not dest_podcasts:
+            click.echo(f"Skipped (no podcasts): {dest_name}")
+            continue
+        index_path = PodcastPublisher.build_static_site_index(
+            dest_name, dest_cfg, dest_podcasts, store
+        )
+        if index_path:
+            click.echo(f"Site index: {dest_name} -> {index_path}")
+        else:
+            click.echo(
+                f"Skipped (single root-mounted podcast): {dest_name}"
+            )
 
 
 if __name__ == '__main__':

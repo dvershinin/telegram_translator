@@ -90,9 +90,45 @@ sources:
 voicebox:
   url: "http://localhost:17493"
 
+# Publish destinations — each holds host-level settings shared by the
+# podcasts hosted on that destination. Podcasts reference a destination by
+# name and inherit base_url / publish_dir / sync_command from it.
+#
+# Two destination types:
+#   - static: our publisher generates HTML index pages + RSS feeds + M4A
+#     files and rsyncs the whole publish_dir to the host. Use this for
+#     standalone podcast hosts.
+#   - astro_collection: our publisher writes episode Markdown + audio
+#     assets into an Astro project (Vaske-style). Astro's own build
+#     renders the pages, styles, and feed. Use this to integrate a
+#     podcast into an existing Astro site whose theme should stay in sync.
+#
+# Legacy per-podcast publish: blocks (with base_url/publish_dir/
+# sync_command set inside publish:) still work when a podcast has no
+# destination: key — no migration needed.
+destinations:
+  getpagespeed:
+    type: static                               # default if omitted
+    base_url: "https://podcasts.getpagespeed.com"
+    publish_dir: "./publish/getpagespeed"
+    sync_command: "rsync -avz --delete ./publish/getpagespeed/ podcasts@web.getpagespeed.com:/srv/www/podcasts.getpagespeed.com/httpdocs/"
+    site_title: "GetPageSpeed Podcasts"
+    site_description: "Daily briefings on tech, geopolitics, and more."
+    copyright: "\u00a9 2026 GetPageSpeed LLC"
+
+  # Example astro_collection destination — integrates with an Astro site.
+  # vaske:
+  #   type: astro_collection
+  #   base_url: "https://www.vaske.ru/podcast/"  # trailing slash is fine, normalized
+  #   content_dir: "~/Projects/Vaske/src/content/podcast"
+  #   public_dir: "~/Projects/Vaske/public/podcast"
+  #   sync_command: "cd ~/Projects/Vaske && ./deploy.sh"
+
 # Named podcasts — each with its own identity, sources, voice, and prompts
 podcasts:
   daily_briefing:
+    destination: getpagespeed                  # references destinations.<name> above
+    # slug: "daily-briefing"                   # optional URL path override; defaults to podcast key
     title: "The Daily Briefing"
     host_name: "Angela"
     sources: [naebnet, lenta, cnn]          # references global source names
@@ -128,8 +164,9 @@ podcasts:
     output_dir: "./podcasts/daily_briefing"
     pause_between_segments_ms: 800
     publish:
-      base_url: "https://podcasts.getpagespeed.com/daily_briefing"
-      publish_dir: "./publish/daily_briefing"
+      # Per-podcast (show-level) metadata only — base_url, publish_dir,
+      # and sync_command come from the destination above. Setting any of
+      # those here will raise a validation error at config load time.
       m4a_bitrate: "128k"
       show_artwork: "./podcasts/daily_briefing/assets/artwork.jpg"
       show_description: "Daily geopolitics, tech, and science briefing."
@@ -137,4 +174,21 @@ podcasts:
       show_subcategory: "Daily News"
       explicit: false
       copyright: "\u00a9 2024 Your Company"  # Copyright notice
-      sync_command: "rsync -avz ./publish/daily_briefing/ podcasts@web.getpagespeed.com:/srv/www/podcasts.getpagespeed.com/httpdocs/daily_briefing/"
+      # spotify_url: "https://open.spotify.com/show/..."  # optional
+
+  # Example astro_collection podcast (single podcast at the destination root)
+  # vaske_daily:
+  #   destination: vaske                     # astro_collection type — see destinations above
+  #   title: "Vaske Daily"
+  #   host_name: "Vaske"
+  #   sources: [lenta]
+  #   voice_profile: "default"
+  #   language: "ru"
+  #   model: "gpt-4o"
+  #   executive_prompt: |
+  #     ...
+  #   podcast_prompt: |
+  #     ...
+  #   publish:
+  #     show_artwork: "./podcasts/vaske_daily/assets/artwork.jpg"
+  #     show_description: "\u0412\u0430\u0441\u044c\u043a\u0435 \u0414\u0435\u0439\u043b\u0438"
