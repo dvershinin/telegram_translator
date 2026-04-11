@@ -20,3 +20,8 @@ $CLI digest publish --podcast crosswire
 $CLI digest summarize --podcast the_stack
 $CLI digest podcast --podcast the_stack
 $CLI digest publish --podcast the_stack
+
+# Vaske (Russian): summarize → generate audio → publish
+$CLI digest summarize --podcast vaske_daily
+$CLI digest podcast --podcast vaske_daily
+$CLI digest publish --podcast vaske_daily
