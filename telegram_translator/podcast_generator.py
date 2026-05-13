@@ -1,11 +1,13 @@
 """Voicebox-based podcast audio generation."""
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
 import shutil
 import struct
+import time
 import wave
 from pathlib import Path
 from typing import Optional
@@ -519,18 +521,7 @@ class PodcastGenerator:
         if self._profile_id:
             return self._profile_id
 
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(
-                    f"{self.voicebox_url}/profiles"
-                )
-                response.raise_for_status()
-                profiles = response.json()
-        except httpx.HTTPError:
-            raise RuntimeError(
-                f"Cannot reach Voicebox at {self.voicebox_url}. "
-                "Is the backend running?"
-            )
+        profiles = await self._fetch_profiles_with_retry()
 
         for profile in profiles:
             if profile.get("id") == self.voice_profile_name:
@@ -555,6 +546,50 @@ class PodcastGenerator:
         raise RuntimeError(
             f"Voice profile '{self.voice_profile_name}' not found. "
             f"Available profiles: {available}"
+        )
+
+    async def _fetch_profiles_with_retry(self) -> list[dict]:
+        """Fetch /profiles, tolerating a brief launchd cold-start window.
+
+        Voicebox under brew runs via launchd socket activation with
+        ``RunAtLoad: false`` and a 30-minute idle exit, so each call
+        from a long-idle state may need a few seconds for the process
+        to spawn and uvicorn to begin accepting requests. Retry
+        ``GET /profiles`` for up to 30 s wall-clock at 2 s cadence.
+
+        Returns:
+            Parsed JSON list of profile dicts.
+
+        Raises:
+            RuntimeError: If voicebox stays unreachable past the budget.
+        """
+        deadline = time.monotonic() + 30.0
+        attempt = 0
+        last_error: httpx.HTTPError | None = None
+        while True:
+            attempt += 1
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    response = await client.get(
+                        f"{self.voicebox_url}/profiles"
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if time.monotonic() >= deadline:
+                    break
+                if attempt == 1:
+                    logger.info(
+                        "Voicebox cold; waiting for /profiles at %s",
+                        self.voicebox_url,
+                    )
+                await asyncio.sleep(2.0)
+
+        raise RuntimeError(
+            f"Cannot reach Voicebox at {self.voicebox_url} "
+            f"after {attempt} attempts ({last_error}). "
+            "Is the backend running?"
         )
 
     def _tts_cache_path(self, text: str) -> Path | None:
