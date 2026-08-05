@@ -1,7 +1,6 @@
 import yaml
 import logging
 from typing import Dict, List, Any, Optional, Tuple
-from telethon.tl.types import InputChannel
 from telethon.errors import UsernameNotOccupiedError, ChannelPrivateError
 
 logger = logging.getLogger(__name__)
@@ -270,20 +269,20 @@ class ChannelManager:
         """Print a human-readable summary of the configuration"""
         summary = self.get_summary()
         
-        print(f"\n📊 Channel Configuration Summary:")
+        print("\n📊 Channel Configuration Summary:")
         print(f"   Total input channels: {summary['total_input_channels']}")
         print(f"   Total output channels: {summary['total_output_channels']}")
         print(f"   Channel pairs: {summary['total_pairs']}")
         
         if summary['errors']:
-            print(f"\n⚠️  Configuration Errors:")
+            print("\n⚠️  Configuration Errors:")
             for error in summary['errors']:
                 print(f"   - {error}")
         else:
-            print(f"\n✅ Configuration is valid")
+            print("\n✅ Configuration is valid")
         
         if summary['pairs']:
-            print(f"\n📋 Channel Pairs:")
+            print("\n📋 Channel Pairs:")
             for pair_name, pair_info in summary['pairs'].items():
                 print(f"   {pair_name}:")
                 print(f"     Input channels: {pair_info['input_count']}")
@@ -299,7 +298,7 @@ class ChannelManager:
         """Print a summary with resolved channel IDs"""
         resolved_pairs = await self.get_resolved_channel_pairs()
         
-        print(f"\n🔍 Resolved Channel Configuration:")
+        print("\n🔍 Resolved Channel Configuration:")
         for pair_name, pair_config in resolved_pairs.items():
             print(f"   {pair_name}:")
             print(f"     Input channels: {pair_config.get('input_channels', [])}")

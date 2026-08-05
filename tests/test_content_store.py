@@ -1,6 +1,7 @@
 """Tests for ContentStore exclude_used / exclude_podcast filtering."""
 
 from datetime import datetime, timedelta, timezone
+import sqlite3
 
 import pytest
 
@@ -15,7 +16,6 @@ def store(tmp_path):
 
 def _insert_items(store, count=3, source="lenta"):
     """Insert test content items and return their IDs."""
-    ids = []
     for i in range(count):
         store.store_content(
             source_name=source,
@@ -115,3 +115,49 @@ class TestExcludeUsedNoItemsUsed:
         result_ids = {item.id for item in result}
         for item_id in ids:
             assert item_id in result_ids
+
+
+class TestGetContentItemsByIds:
+    """Selected-item lookups preserve selection order."""
+
+    def test_returns_requested_order_and_omits_missing(self, store):
+        ids = _insert_items(store, count=3)
+        result = store.get_content_items_by_ids(
+            [ids[2], 999999, ids[0]]
+        )
+        assert [item.id for item in result] == [ids[2], ids[0]]
+
+
+class TestRefreshDuplicate:
+    """Backlog candidates stay inside the active collection window."""
+
+    def test_refreshes_timestamp_without_reporting_new_item(self, store):
+        assert store.store_content(
+            source_name="gps",
+            source_type="web",
+            title="Article",
+            content="Same body",
+            url="https://example.com/old",
+        )
+        with sqlite3.connect(store.db_path) as conn:
+            conn.execute(
+                "UPDATE content_items SET collected_at = ?",
+                ("2020-01-01 00:00:00",),
+            )
+            conn.commit()
+
+        assert not store.store_content(
+            source_name="gps",
+            source_type="web",
+            title="Updated title",
+            content="Same body",
+            url="https://example.com/new",
+            refresh_duplicate=True,
+        )
+
+        recent = store.get_content_since(
+            datetime.now(tz=timezone.utc) - timedelta(minutes=1)
+        )
+        assert len(recent) == 1
+        assert recent[0].title == "Updated title"
+        assert recent[0].url == "https://example.com/new"

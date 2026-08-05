@@ -1,12 +1,9 @@
 from telethon import TelegramClient, events
 from telethon.tl.types import InputChannel
 import logging
-import yaml
 import html
-import re
 import sys
 import asyncio
-from pathlib import Path
 
 # Import our configuration managers
 from telegram_translator.config_manager import ConfigManager
@@ -205,7 +202,7 @@ async def print_persistence_stats():
     if not persistence_managers:
         return
     
-    print(f"\n💾 Persistence Statistics:")
+    print("\n💾 Persistence Statistics:")
     for pair_name, persistence_manager in persistence_managers.items():
         stats = await persistence_manager.get_stats()
         db_info = persistence_manager.get_database_info()
@@ -303,8 +300,8 @@ def format_message(original_text: str, translated_text: str, chat_name: str, lin
                 f'<p><p>{border}\n' + 
                 f'<b>{html.escape(chat_name)}</b>\n' + 
                 f'{border}\n\n</p>' + 
-                f'<p>[TRANSLATED MESSAGE]\n' + 
-                f'\n\n</p>' + 
+                '<p>[TRANSLATED MESSAGE]\n' +
+                '\n\n</p>' +
                 f'<p>{border}\n' + 
                 f'{link}/{message_id} ↩</p></p>')
             
@@ -542,6 +539,7 @@ async def main():
         # Initialize the bot
         await initialize_bot()
         
+        session_path = config_manager.get_telegram_credentials()["session_name"]
         print(f'[Telegram Translator] Session file: {session_path}')
         print(f'[Telegram Translator] Log file: {config_manager.get_log_path()}')
         

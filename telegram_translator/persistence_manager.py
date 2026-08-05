@@ -1,8 +1,7 @@
 import logging
 import hashlib
 import sqlite3
-import json
-from typing import Dict, Set, Optional, Any
+from typing import Dict, Any
 from datetime import datetime, timedelta
 from pathlib import Path
 from telethon import TelegramClient

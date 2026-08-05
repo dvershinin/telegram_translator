@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # ``publish:`` block — they come from the destination.
 _FORBIDDEN_PODCAST_PUBLISH_KEYS = ("base_url", "publish_dir", "sync_command")
 
-_VALID_DESTINATION_TYPES = ("static", "astro_collection")
+_VALID_DESTINATION_TYPES = ("static", "astro_collection", "wordpress")
 
 class ConfigManager:
     """Manages configuration for the Telegram Translator app"""
@@ -209,7 +209,7 @@ class ConfigManager:
                     "site_description", ""
                 )
                 entry["copyright"] = cfg.get("copyright", "")
-            else:  # astro_collection
+            elif dest_type == "astro_collection":
                 content_dir = cfg.get("content_dir")
                 public_dir = cfg.get("public_dir")
                 if not content_dir or not public_dir:
@@ -222,6 +222,34 @@ class ConfigManager:
                 )
                 entry["public_dir"] = str(
                     Path(public_dir).expanduser()
+                )
+            else:  # wordpress
+                if not base_url:
+                    raise ValueError(
+                        f"WordPress destination '{name}' requires "
+                        f"'base_url'"
+                    )
+                username_env = cfg.get("username_env")
+                application_password_env = cfg.get(
+                    "application_password_env"
+                )
+                if not username_env or not application_password_env:
+                    raise ValueError(
+                        f"WordPress destination '{name}' requires both "
+                        f"'username_env' and 'application_password_env'"
+                    )
+                publish_dir = cfg.get(
+                    "publish_dir", f"./publish/{name}"
+                )
+                entry["publish_dir"] = str(
+                    Path(publish_dir).expanduser()
+                )
+                entry["username_env"] = str(username_env)
+                entry["application_password_env"] = str(
+                    application_password_env
+                )
+                entry["post_type"] = str(
+                    cfg.get("post_type", "podcast")
                 )
 
             resolved[name] = entry
@@ -540,6 +568,22 @@ class ConfigManager:
             publish["sync_command"] = dest.get("sync_command", "")
             return publish, dest_ref, dest_type, slug
 
+        if dest_type == "wordpress":
+            publish = dict(raw_publish)
+            if not publish.get("series_id"):
+                raise ValueError(
+                    f"WordPress podcast '{name}' requires "
+                    f"'publish.series_id'"
+                )
+            publish["base_url"] = base_url
+            publish["publish_dir"] = dest["publish_dir"]
+            publish["username_env"] = dest["username_env"]
+            publish["application_password_env"] = dest[
+                "application_password_env"
+            ]
+            publish["post_type"] = dest.get("post_type", "podcast")
+            return publish, dest_ref, dest_type, None
+
         # astro_collection
         publish = dict(raw_publish)
         publish["base_url"] = base_url
@@ -607,16 +651,16 @@ class ConfigManager:
 
     def print_app_info(self):
         """Print application directory information"""
-        print(f"\n📁 Application Directories:")
+        print("\n📁 Application Directories:")
         directories = self.get_app_directories()
         for name, path in directories.items():
             print(f"   {name}: {path}")
         
         # Check if directories exist
-        print(f"\n📂 Directory Status:")
+        print("\n📂 Directory Status:")
         for name, path in directories.items():
             path_obj = Path(path)
             if path_obj.exists():
                 print(f"   ✅ {name}: {path}")
             else:
-                print(f"   ❌ {name}: {path} (does not exist)") 
+                print(f"   ❌ {name}: {path} (does not exist)")

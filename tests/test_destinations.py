@@ -163,6 +163,47 @@ class TestResolveDestinations:
         assert dest["site_description"] == "Desc"
         assert dest["copyright"] == "© 2026"
 
+    def test_wordpress_destination_resolves_credentials_and_local_dir(
+        self, tmp_path
+    ):
+        mgr = _make_mgr(
+            {
+                "destinations": {
+                    "wp": {
+                        "type": "wordpress",
+                        "base_url": "https://www.getpagespeed.com/",
+                        "publish_dir": "~/podcasts/wordpress",
+                        "username_env": "GPS_WP_USER",
+                        "application_password_env": "GPS_WP_APP_PASSWORD",
+                    }
+                }
+            },
+            tmp_path,
+        )
+        dest = mgr.resolve_destinations()["wp"]
+        assert dest["type"] == "wordpress"
+        assert dest["base_url"] == "https://www.getpagespeed.com"
+        assert dest["username_env"] == "GPS_WP_USER"
+        assert dest["application_password_env"] == "GPS_WP_APP_PASSWORD"
+        assert "~" not in dest["publish_dir"]
+
+    def test_wordpress_destination_requires_credential_env_names(
+        self, tmp_path
+    ):
+        mgr = _make_mgr(
+            {
+                "destinations": {
+                    "wp": {
+                        "type": "wordpress",
+                        "base_url": "https://www.getpagespeed.com",
+                    }
+                }
+            },
+            tmp_path,
+        )
+        with pytest.raises(ValueError, match="username_env"):
+            mgr.resolve_destinations()
+
     def test_rejects_invalid_type(self, tmp_path):
         mgr = _make_mgr(
             {
@@ -403,6 +444,71 @@ class TestPodcastResolutionWithDestination:
         assert resolved["publish"]["sync_command"] == "echo vaske"
         # No derived publish_dir for astro_collection
         assert "publish_dir" not in resolved["publish"]
+
+    def test_wordpress_podcast_inherits_destination(self, tmp_path):
+        mgr = _make_mgr(
+            {
+                "sources": {
+                    "telegram": {},
+                    "web": {
+                        "gps": {
+                            "type": "wordpress",
+                            "url": (
+                                "https://www.getpagespeed.com/"
+                                "wp-json/wp/v2/posts"
+                            ),
+                        }
+                    },
+                },
+                "destinations": {
+                    "wp": {
+                        "type": "wordpress",
+                        "base_url": "https://www.getpagespeed.com",
+                        "publish_dir": "./publish/wp",
+                        "username_env": "GPS_WP_USER",
+                        "application_password_env": "GPS_WP_APP_PASSWORD",
+                    }
+                },
+                "podcasts": {
+                    "scalable_stories": {
+                        "destination": "wp",
+                        "title": "Scalable Stories",
+                        "sources": ["gps"],
+                        "publish": {"series_id": 456},
+                    }
+                },
+            },
+            tmp_path,
+        )
+        resolved = mgr.resolve_podcast_configs()["scalable_stories"]
+        assert resolved["destination_type"] == "wordpress"
+        assert resolved["slug"] is None
+        assert resolved["publish"]["series_id"] == 456
+        assert resolved["publish"]["post_type"] == "podcast"
+        assert resolved["publish"]["username_env"] == "GPS_WP_USER"
+
+    def test_wordpress_podcast_requires_series(self, tmp_path):
+        mgr = _make_mgr(
+            {
+                "destinations": {
+                    "wp": {
+                        "type": "wordpress",
+                        "base_url": "https://www.getpagespeed.com",
+                        "username_env": "GPS_WP_USER",
+                        "application_password_env": "GPS_WP_APP_PASSWORD",
+                    }
+                },
+                "podcasts": {
+                    "scalable_stories": {
+                        "destination": "wp",
+                        "title": "Scalable Stories",
+                    }
+                },
+            },
+            tmp_path,
+        )
+        with pytest.raises(ValueError, match="series_id"):
+            mgr.resolve_podcast_configs()
 
 
 class TestValidationErrors:

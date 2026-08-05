@@ -85,6 +85,17 @@ sources:
       language: "en"
       prompt: "Focus on major world events and geopolitical shifts"
       max_articles: 15
+    # WordPress archive source. It compares posts against existing podcast
+    # episode slugs/titles and returns only articles not yet covered, newest
+    # first. max_articles: 1 gives one article-deep-dive episode per run while
+    # safely working through the full historical archive.
+    # getpagespeed_articles:
+    #   type: wordpress
+    #   url: "https://www.getpagespeed.com/wp-json/wp/v2/posts"
+    #   episode_url: "https://www.getpagespeed.com/wp-json/wp/v2/podcast"
+    #   podcast_series_id: 456
+    #   language: "en"
+    #   max_articles: 1
 
 # Shared Voicebox connection
 voicebox:
@@ -123,6 +134,17 @@ destinations:
   #   content_dir: "~/Projects/Vaske/src/content/podcast"
   #   public_dir: "~/Projects/Vaske/public/podcast"
   #   sync_command: "cd ~/Projects/Vaske && ./deploy.sh"
+
+  # WordPress + Seriously Simple Podcasting destination. Credentials are
+  # always read from environment variables (use a dedicated application
+  # password); no secret belongs in this YAML file.
+  # getpagespeed_wordpress:
+  #   type: wordpress
+  #   base_url: "https://www.getpagespeed.com"
+  #   publish_dir: "./publish/getpagespeed-wordpress"
+  #   username_env: "GPS_WP_USER"
+  #   application_password_env: "GPS_WP_APP_PASSWORD"
+  #   post_type: "podcast"
 
 # Named podcasts — each with its own identity, sources, voice, and prompts
 podcasts:
@@ -192,3 +214,33 @@ podcasts:
   #   publish:
   #     show_artwork: "./podcasts/vaske_daily/assets/artwork.jpg"
   #     show_description: "\u0412\u0430\u0441\u044c\u043a\u0435 \u0414\u0435\u0439\u043b\u0438"
+
+  # Existing-Apple-feed WordPress podcast. The WordPress series remains the
+  # RSS source of truth, so historical GUIDs and subscribers are preserved.
+  # scalable_stories:
+  #   destination: getpagespeed_wordpress
+  #   title: "Scalable Stories"
+  #   host_name: "GetPageSpeed"
+  #   sources: [getpagespeed_articles]
+  #   selection_prompt: |
+  #     Select exactly one article: the single supplied GetPageSpeed article.
+  #     Return only that article's ID.
+  #   voice_profile: "default"
+  #   language: "en"
+  #   model: "gpt-4o"
+  #   executive_prompt: |
+  #     Turn the supplied GetPageSpeed article into an accurate technical
+  #     briefing. Preserve commands, configuration directives, versions, and
+  #     caveats exactly. Explain the problem, solution, and practical payoff.
+  #   podcast_prompt: |
+  #     You are the host of {title}. Today is {date}. Turn this single-article
+  #     briefing into a useful 6-10 minute technical deep dive for sysadmins
+  #     and developers. Never invent commands or claims. Open with the problem
+  #     the listener will solve, teach the solution conversationally, and end
+  #     by inviting the listener to read the full article on GetPageSpeed.
+  #   output_dir: "./podcasts/scalable_stories"
+  #   publish:
+  #     series_id: 456
+  #     post_status: publish
+  #     m4a_bitrate: "96k"
+  #     explicit: false

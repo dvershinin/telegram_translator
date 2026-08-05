@@ -143,6 +143,8 @@ class PodcastPublisher:
           per-podcast HTML index + (legacy only) per-podcast sync command.
         - ``astro_collection``: encode m4a + copy artwork + write episode
           Markdown into the Astro content collection. No feed, no HTML.
+        - ``wordpress``: encode m4a, upload it through WordPress REST, and
+          publish an idempotent Seriously Simple Podcasting episode.
 
         Destination-scoped podcasts (both types) skip running the
         destination sync command here — the CLI runs it once after all
@@ -179,7 +181,16 @@ class PodcastPublisher:
         if not wav_path.exists():
             raise RuntimeError(f"Audio file not found: {wav_path}")
 
-        if destination_type == "astro_collection":
+        if destination_type == "wordpress":
+            from telegram_translator.wordpress_publisher import (
+                WordPressPodcastPublisher,
+            )
+
+            wordpress = WordPressPodcastPublisher(self.config, self.store)
+            m4a_path = await wordpress.publish(
+                podcast_name, date, digest, wav_path
+            )
+        elif destination_type == "astro_collection":
             m4a_path = await self._publish_astro(
                 podcast_name, date, digest, wav_path, publish_cfg
             )
@@ -675,7 +686,7 @@ class PodcastPublisher:
                 f'  <div class="meta">\n'
                 f'    <time>{html.escape(ep.get("pub_date", ""))}</time>\n'
                 + (f'    <span class="duration">{dur_str}</span>\n' if dur_str else "")
-                + f'  </div>\n'
+                + '  </div>\n'
                 + (
                     f'  <audio controls preload="none">\n'
                     f'    <source src="{html.escape(audio_url)}" type="audio/x-m4a">\n'
@@ -694,7 +705,7 @@ class PodcastPublisher:
                     f'download>Download</a>\n'
                     if audio_url else ""
                 )
-                + f'</article>'
+                + '</article>'
             )
 
         episodes_html = "\n".join(episode_cards)

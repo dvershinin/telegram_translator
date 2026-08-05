@@ -220,6 +220,10 @@ class DigestPipeline:
                     title=article.title,
                     url=article.url,
                     published_at=article.published_at,
+                    refresh_duplicate=(
+                        sources.get(source_name, {}).get("type")
+                        == "wordpress"
+                    ),
                 )
                 if inserted:
                     new_count += 1
@@ -249,7 +253,7 @@ class DigestPipeline:
         for podcast_name, pcfg in self.podcast_configs.items():
             logger.info("Summarizing for podcast: %s", podcast_name)
 
-            digest = self.store.create_digest(date, podcast_name)
+            self.store.create_digest(date, podcast_name)
             self.store.update_digest(
                 date, podcast_name, status="summarizing"
             )

@@ -96,6 +96,64 @@ telegram-translator digest feed --podcast crosswire
 
 Then re-sync manually or run the sync command.
 
+## Publishing Into an Existing WordPress Podcast
+
+Use a `wordpress` destination when an established Seriously Simple
+Podcasting feed must remain the source of truth. This migrates production into
+the shared generator without changing the feed URL, historical GUIDs, or Apple
+Podcasts listing.
+
+```yaml
+sources:
+  web:
+    getpagespeed_articles:
+      type: wordpress
+      url: "https://www.getpagespeed.com/wp-json/wp/v2/posts"
+      episode_url: "https://www.getpagespeed.com/wp-json/wp/v2/podcast"
+      podcast_series_id: 456
+      max_articles: 1
+
+destinations:
+  getpagespeed_wordpress:
+    type: wordpress
+    base_url: "https://www.getpagespeed.com"
+    publish_dir: "./publish/getpagespeed-wordpress"
+    username_env: "GPS_WP_USER"
+    application_password_env: "GPS_WP_APP_PASSWORD"
+
+podcasts:
+  scalable_stories:
+    destination: getpagespeed_wordpress
+    title: "Scalable Stories"
+    sources: [getpagespeed_articles]
+    selection_prompt: "Select exactly the single supplied article."
+    # prompts, voice, audio settings ...
+    publish:
+      series_id: 456
+      post_status: publish
+      m4a_bitrate: "96k"
+```
+
+Create a dedicated WordPress application password and export the username and
+password under the configured env names. The publisher uses this retry-safe
+sequence:
+
+1. Resolve the selected article and deterministic `{article-slug}-audio` slug.
+2. Reuse that episode or create it as a draft.
+3. Reuse attached audio or upload the generated M4A.
+4. Set SSP audio metadata and publish the episode.
+5. Verify the REST response before marking the digest published and its source
+   article used.
+
+The WordPress collector compares the full post archive against existing
+episode slugs and normalized titles. With `max_articles: 1`, each run prefers
+the newest uncovered article and then steadily backfills the archive. A local
+database reset does not cause duplicate episodes because WordPress itself is
+the durable ledger.
+
+`digest feed` intentionally skips WordPress podcasts because WordPress owns
+their feed.
+
 ## Publish Directory Structure
 
 ```

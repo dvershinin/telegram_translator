@@ -5,7 +5,6 @@ causing publish failures when the cron ran between midnight UTC and
 midnight local time (e.g., 04:00 WITA = 20:00 UTC previous day).
 """
 
-import ast
 import re
 from pathlib import Path
 

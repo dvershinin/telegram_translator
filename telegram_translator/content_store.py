@@ -241,6 +241,7 @@ class ContentStore:
         url: Optional[str] = None,
         message_id: Optional[int] = None,
         published_at: Optional[datetime] = None,
+        refresh_duplicate: bool = False,
     ) -> bool:
         """Store a content item, deduplicating by hash.
 
@@ -252,6 +253,10 @@ class ContentStore:
             url: Optional URL.
             message_id: Optional Telegram message ID.
             published_at: Optional publication timestamp.
+            refresh_duplicate: If True, refresh ``collected_at`` and mutable
+                metadata when the content already exists. Used by durable
+                backlog sources whose item must remain eligible until its
+                downstream publication succeeds.
 
         Returns:
             True if the item was inserted, False if it was a duplicate.
@@ -280,6 +285,22 @@ class ContentStore:
                     ),
                 )
                 inserted = cursor.rowcount > 0
+                if not inserted and refresh_duplicate:
+                    cursor.execute(
+                        """
+                        UPDATE content_items
+                        SET title = ?, url = ?, published_at = ?,
+                            collected_at = CURRENT_TIMESTAMP
+                        WHERE source_name = ? AND content_hash = ?
+                        """,
+                        (
+                            title,
+                            url,
+                            published_at,
+                            source_name,
+                            content_hash,
+                        ),
+                    )
                 conn.commit()
                 if inserted:
                     logger.debug(
@@ -418,6 +439,42 @@ class ContentStore:
                 "Failed to mark items used for %s/%s",
                 podcast_name, date, exc_info=True,
             )
+
+    def get_content_items_by_ids(
+        self,
+        item_ids: list[int],
+    ) -> list[ContentItem]:
+        """Retrieve content items in the caller's requested order.
+
+        Args:
+            item_ids: Content item primary keys.
+
+        Returns:
+            Matching content items, ordered like ``item_ids``. Missing IDs
+            are omitted.
+        """
+        if not item_ids:
+            return []
+
+        placeholders = ",".join("?" for _ in item_ids)
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    f"SELECT * FROM content_items "  # noqa: S608
+                    f"WHERE id IN ({placeholders})",
+                    item_ids,
+                ).fetchall()
+            by_id = {
+                int(row["id"]): self._row_to_content_item(row)
+                for row in rows
+            }
+            return [by_id[item_id] for item_id in item_ids if item_id in by_id]
+        except Exception:
+            logger.error(
+                "Failed to retrieve content items by ID", exc_info=True
+            )
+            return []
 
     def create_digest(
         self,

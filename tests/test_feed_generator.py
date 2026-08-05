@@ -1,13 +1,11 @@
 """Tests for the RSS feed generator."""
 
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import pytest
 
 from telegram_translator.feed_generator import (
     ATOM_NS,
-    CONTENT_NS,
     ITUNES_NS,
     PodcastFeed,
     _markdown_to_html,

@@ -8,14 +8,16 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
 
 # Import our modules
 from telegram_translator.config_manager import ConfigManager
 from telegram_translator.channel_manager import ChannelManager
 from telegram_translator.translation_manager import TranslationManager
-from telegram_translator.persistence_manager import PersistenceManager
-from telegram_translator.listener import initialize_bot, setup_channel_pair_handlers, process_message_for_pair_sync, initialize_persistence_managers
+from telegram_translator.listener import (
+    initialize_bot,
+    initialize_persistence_managers,
+    setup_channel_pair_handlers,
+)
 from telethon import events
 
 # Setup logging
@@ -617,6 +619,10 @@ def digest_publish(date, podcast_name):
                 # an episode is replaced; harmless otherwise.
                 PodcastPublisher.wipe_astro_cache(dest_cfg)
                 click.echo(f"Wiped Astro cache: {dest_name}")
+            elif dest_cfg.get("type") == "wordpress":
+                # The per-podcast publisher already performed and verified
+                # the remote REST write. There is no destination sync step.
+                continue
 
             ok = PodcastPublisher.run_destination_sync(dest_name, dest_cfg)
             if ok:
@@ -651,11 +657,13 @@ def digest_feed(podcast_name):
         targets = all_podcasts
 
     for pname, pcfg in targets.items():
-        if pcfg.get("destination_type") == "astro_collection":
-            # astro_collection destinations have no RSS feed of their own;
-            # the downstream Astro build handles it.
+        if pcfg.get("destination_type") in {
+            "astro_collection", "wordpress"
+        }:
+            # These destinations do not use telegram_translator's static RSS
+            # generator. Astro builds its own feed; WordPress owns its feed.
             click.echo(
-                f"Skipped (astro_collection): {pname}"
+                f"Skipped ({pcfg.get('destination_type')}): {pname}"
             )
             continue
         publisher = PodcastPublisher(pcfg, store)
@@ -728,4 +736,4 @@ def digest_site(destination_name):
 
 
 if __name__ == '__main__':
-    cli() 
+    cli()
