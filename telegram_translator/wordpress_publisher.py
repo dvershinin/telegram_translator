@@ -85,7 +85,18 @@ class WordPressPodcastPublisher:
             "date": date,
         }
         bitrate = self.publish_cfg.get("m4a_bitrate", "96k")
-        m4a_path, duration = encode_m4a(wav_path, m4a_path, bitrate, metadata)
+        loudness_target = self.publish_cfg.get("loudness_target_lufs")
+        m4a_path, duration = encode_m4a(
+            wav_path,
+            m4a_path,
+            bitrate,
+            metadata,
+            (
+                float(loudness_target)
+                if loudness_target is not None
+                else None
+            ),
+        )
 
         username, application_password = self._credentials()
         base_url = self.publish_cfg["base_url"].rstrip("/")

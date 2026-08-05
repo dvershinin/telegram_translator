@@ -21,6 +21,11 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 def _plain_text(value: str) -> str:
     """Convert a small WordPress HTML fragment to readable plain text."""
+    value = value.strip()
+    if not value:
+        return ""
+    if "<" not in value:
+        return re.sub(r"\s+", " ", html.unescape(value)).strip()
     extracted = trafilatura.extract(
         value,
         include_comments=False,

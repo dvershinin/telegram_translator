@@ -223,8 +223,8 @@ podcasts:
   #   host_name: "GetPageSpeed"
   #   sources: [getpagespeed_articles]
   #   selection_prompt: |
-  #     Select exactly one article: the single supplied GetPageSpeed article.
-  #     Return only that article's ID.
+  #     The single supplied GetPageSpeed article is always eligible. Select it
+  #     by returning only its displayed catalog number: 1.
   #   voice_profile: "default"
   #   language: "en"
   #   model: "gpt-4o"
@@ -243,4 +243,5 @@ podcasts:
   #     series_id: 456
   #     post_status: publish
   #     m4a_bitrate: "96k"
+  #     loudness_target_lufs: -19
   #     explicit: false

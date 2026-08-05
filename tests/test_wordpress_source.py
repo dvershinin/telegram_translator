@@ -4,7 +4,20 @@ import asyncio
 
 import httpx
 
-from telegram_translator.web_scraper import WebScraper
+from telegram_translator.web_scraper import WebScraper, _plain_text
+
+
+def test_plain_wordpress_text_skips_html_parser(monkeypatch):
+    """Empty and already-plain REST fields must not emit parser errors."""
+    monkeypatch.setattr(
+        "telegram_translator.web_scraper.trafilatura.extract",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("HTML parser should not run")
+        ),
+    )
+
+    assert _plain_text("") == ""
+    assert _plain_text("New &amp; Useful Article") == "New & Useful Article"
 
 
 def test_wordpress_source_skips_existing_episode(monkeypatch):

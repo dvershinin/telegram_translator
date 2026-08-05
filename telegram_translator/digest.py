@@ -37,8 +37,6 @@ class DigestPipeline:
         db_path = config_manager.get_database_path("content_store.db")
         self.store = ContentStore(db_path)
 
-        self.sources_config = config.get("sources", {})
-
         all_podcasts = config_manager.resolve_podcast_configs()
         if podcast_name:
             if podcast_name not in all_podcasts:
@@ -48,8 +46,10 @@ class DigestPipeline:
                     f"Available: {available}"
                 )
             self.podcast_configs = {podcast_name: all_podcasts[podcast_name]}
+            self.sources_config = self.podcast_configs[podcast_name]["sources"]
         else:
             self.podcast_configs = all_podcasts
+            self.sources_config = config.get("sources", {})
 
     def _today(self) -> str:
         """Return today's date as YYYY-MM-DD in local time."""
@@ -255,7 +255,10 @@ class DigestPipeline:
 
             self.store.create_digest(date, podcast_name)
             self.store.update_digest(
-                date, podcast_name, status="summarizing"
+                date,
+                podcast_name,
+                status="summarizing",
+                error_message="",
             )
 
             try:

@@ -132,6 +132,7 @@ podcasts:
       series_id: 456
       post_status: publish
       m4a_bitrate: "96k"
+      loudness_target_lufs: -19
 ```
 
 Create a dedicated WordPress application password and export the username and
@@ -153,6 +154,10 @@ the durable ledger.
 
 `digest feed` intentionally skips WordPress podcasts because WordPress owns
 their feed.
+
+Set `loudness_target_lufs: -19` for mono spoken-word delivery. The M4A encoder
+uses measured two-pass EBU R128 normalization with a -2 dB pre-encode
+true-peak target while leaving the generated source WAV untouched.
 
 ## Publish Directory Structure
 

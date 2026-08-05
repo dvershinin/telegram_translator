@@ -68,7 +68,10 @@ def test_publisher_draft_upload_finalize(monkeypatch, tmp_path):
     _write_wav(wav_path)
     requests: list[tuple[str, str, dict]] = []
 
-    def fake_encode(source, destination, bitrate, metadata):
+    def fake_encode(
+        source, destination, bitrate, metadata, loudness_target_lufs
+    ):
+        assert loudness_target_lufs is None
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"m4a-audio")
         return destination, 367.4
@@ -153,7 +156,10 @@ def test_publisher_reuses_existing_audio(monkeypatch, tmp_path):
     _write_wav(wav_path)
     media_posts = 0
 
-    def fake_encode(source, destination, bitrate, metadata):
+    def fake_encode(
+        source, destination, bitrate, metadata, loudness_target_lufs
+    ):
+        assert loudness_target_lufs is None
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"audio")
         return destination, 60.0
