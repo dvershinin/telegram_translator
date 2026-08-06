@@ -62,7 +62,7 @@ Use `/podcast [name]` skill to run the full pipeline interactively — it handle
 
 ## Scheduled Runs
 
-Daily cron (`crontab -l`) runs `scripts/daily_podcasts.sh` at `0 4 * * *` (04:00 local). The script uses `set -eo pipefail`, so a failure in any stage aborts the rest — podcasts run sequentially and the order determines blast radius. Current order: `crosswire` → `the_stack` → `vaske_daily` (Russian last so English episodes still ship if the Russian pipeline errors out). Each podcast runs `summarize` → `podcast` → `publish`. `digest collect` runs once up front (sources are shared).
+Daily cron (`crontab -l`) runs `scripts/daily_podcasts.sh` at `0 4 * * *` (04:00 local). It collects shared sources once, pre-warms Voicebox, then runs `summarize` → `podcast` → `publish` independently for each show. A failed show is logged but does not starve the remaining shows. Current order: `crosswire` → `the_stack` → `scalable_stories` → `vaske_daily`. `scalable_stories` retrieves its WordPress application password from macOS Keychain only for its run and unsets both credential variables afterward.
 
 ## Voicebox Integration
 
