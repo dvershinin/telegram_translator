@@ -213,7 +213,16 @@ class WordPressPodcastPublisher:
     @staticmethod
     def _excerpt(value: str, limit: int = 500) -> str:
         """Build a compact plain-text episode excerpt."""
-        plain = re.sub(r"\s+", " ", html.unescape(value)).strip()
+        plain = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", value)
+        plain = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", plain)
+        plain = re.sub(
+            r"(?m)^\s{0,3}(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)",
+            "",
+            plain,
+        )
+        plain = re.sub(r"[*_~`]", "", plain)
+        plain = re.sub(r"<[^>]+>", " ", plain)
+        plain = re.sub(r"\s+", " ", html.unescape(plain)).strip()
         if len(plain) <= limit:
             return plain
         return plain[: limit - 1].rstrip() + "…"

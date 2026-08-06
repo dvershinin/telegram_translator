@@ -214,3 +214,16 @@ def test_publisher_reuses_existing_audio(monkeypatch, tmp_path):
 def test_metadata_formatters():
     assert _duration_text(367.4) == "00:06:07"
     assert _filesize_text(1024 * 1024) == "1.00MB"
+
+
+def test_excerpt_removes_markdown_syntax():
+    value = """### Technical Briefing
+
+#### Problem Statement
+- **Fast** and [`safe`](https://example.com).
+- [Read the article](https://example.com/article)
+"""
+
+    assert WordPressPodcastPublisher._excerpt(value) == (
+        "Technical Briefing Problem Statement Fast and safe. Read the article"
+    )
