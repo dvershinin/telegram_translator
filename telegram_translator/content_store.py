@@ -37,6 +37,7 @@ class Digest:
     source_summaries: dict = field(default_factory=dict)
     executive_summary: str = ""
     podcast_script: str = ""
+    show_notes: str = ""
     audio_path: str = ""
     m4a_path: str = ""
     duration_seconds: float = 0.0
@@ -145,6 +146,7 @@ class ContentStore:
                 source_summaries TEXT,
                 executive_summary TEXT,
                 podcast_script TEXT,
+                show_notes TEXT,
                 audio_path TEXT,
                 m4a_path TEXT,
                 duration_seconds REAL,
@@ -218,6 +220,7 @@ class ContentStore:
             ("duration_seconds", "REAL"),
             ("published_at", "TIMESTAMP"),
             ("selected_item_ids", "TEXT"),
+            ("show_notes", "TEXT"),
         ]
         for col_name, col_type in new_columns:
             if col_name not in columns:
@@ -816,6 +819,7 @@ class ContentStore:
             source_summaries=summaries,
             executive_summary=row["executive_summary"] or "",
             podcast_script=row["podcast_script"] or "",
+            show_notes=row["show_notes"] or "",
             audio_path=row["audio_path"] or "",
             m4a_path=row["m4a_path"] or "",
             duration_seconds=float(row["duration_seconds"] or 0.0),

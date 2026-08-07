@@ -13,6 +13,11 @@ from pathlib import Path
 from telegram_translator.audio_encoder import encode_m4a
 from telegram_translator.content_store import ContentStore
 from telegram_translator.feed_generator import PodcastFeed, _markdown_to_html
+from telegram_translator.show_notes import (
+    parse_show_notes,
+    render_body,
+    render_description,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -401,6 +406,18 @@ class PodcastPublisher:
             publish_cfg.get("base_url", ""), m4a_filename
         )
 
+        # Resolve show notes. The summarize step normally writes them
+        # alongside executive_summary, but `digest publish` can also run
+        # against a digest that was summarized before the show-notes
+        # stage existed (or without --no-cache) — fall back to
+        # generating them on the fly from the cached executive summary.
+        show_notes_raw = await self._ensure_show_notes(
+            podcast_name, date, digest,
+        )
+
+        show_notes_obj = parse_show_notes(show_notes_raw)
+        verdict_label = self.config.get("verdict_label") or "Verdict"
+
         # Write the episode Markdown into the Astro content collection
         self._write_astro_episode(
             podcast_name=podcast_name,
@@ -409,11 +426,61 @@ class PodcastPublisher:
             formatted_date=formatted_date,
             duration=duration,
             audio_url=audio_url,
-            executive_summary=digest.executive_summary or "",
+            show_notes_obj=show_notes_obj,
+            verdict_label=verdict_label,
             content_dir=content_dir_path,
         )
 
         return str(m4a_path)
+
+    async def _ensure_show_notes(
+        self, podcast_name: str, date: str, digest,
+    ) -> str:
+        """Return the raw show-notes JSON, generating it if absent.
+
+        Args:
+            podcast_name: Podcast identifier.
+            date: Target date (YYYY-MM-DD).
+            digest: Current digest record.
+
+        Returns:
+            JSON string conforming to the show-notes schema.
+
+        Raises:
+            RuntimeError: If no executive summary is available to
+                derive show notes from.
+        """
+        if digest.show_notes:
+            return digest.show_notes
+
+        if not digest.executive_summary:
+            raise RuntimeError(
+                f"Cannot generate show notes for {podcast_name}/{date}: "
+                "no executive summary in the digest record."
+            )
+
+        logger.info(
+            "Backfilling show_notes for %s/%s from executive summary",
+            podcast_name, date,
+        )
+        from telegram_translator.summarizer import Summarizer
+
+        summarizer = Summarizer(
+            self.config,
+            title=self.config.get("title", ""),
+            host_name=self.config.get("host_name", ""),
+            store=self.store,
+            podcast_name=podcast_name,
+        )
+        show_notes_raw = await summarizer.generate_show_notes(
+            digest.executive_summary,
+            date,
+            self.config.get("show_notes_prompt") or None,
+        )
+        self.store.update_digest(
+            date, podcast_name, show_notes=show_notes_raw,
+        )
+        return show_notes_raw
 
     @staticmethod
     def _astro_audio_url(base_url: str, filename: str) -> str:
@@ -446,10 +513,17 @@ class PodcastPublisher:
         formatted_date: str,
         duration: float,
         audio_url: str,
-        executive_summary: str,
+        show_notes_obj: dict,
+        verdict_label: str,
         content_dir: Path,
     ) -> Path:
         """Write an episode Markdown file for an Astro content collection.
+
+        Renders deterministically from the structured show-notes dict \u2014
+        no regex stripping, so hyphens and inter-word spacing survive
+        verbatim. The description comes from ``show_notes.lead`` only,
+        never from the body, so production scaffolding from upstream
+        prompts cannot leak in.
 
         Args:
             podcast_name: Podcast identifier (used in the filename).
@@ -458,7 +532,10 @@ class PodcastPublisher:
             formatted_date: Human-readable date (e.g., "April 11, 2026").
             duration: Episode duration in seconds.
             audio_url: Site-root-relative audio URL.
-            executive_summary: Full episode show notes as Markdown.
+            show_notes_obj: Parsed show-notes dict (see
+                ``telegram_translator.show_notes.parse_show_notes``).
+            verdict_label: Per-podcast label for the per-topic verdict
+                line (e.g. ``"\u0412\u0435\u0440\u0434\u0438\u043a\u0442 \u0412\u0430\u0441\u044c\u043a\u0435"``).
             content_dir: Directory where the episode file will be written.
 
         Returns:
@@ -467,12 +544,8 @@ class PodcastPublisher:
         filename = f"{podcast_name}-{date}.md"
         ep_path = content_dir / filename
 
-        # Derive a short plain-text description (first ~200 chars, no md)
-        flat = re.sub(r"[#*_`>\-]+", "", executive_summary or "")
-        flat = re.sub(r"\s+", " ", flat).strip()
-        description = flat[:200].rstrip()
-        if len(flat) > 200:
-            description += "\u2026"
+        description = render_description(show_notes_obj)
+        body = render_body(show_notes_obj, verdict_label)
 
         # Escape YAML double quotes in string values
         def _q(s: str) -> str:
@@ -495,9 +568,7 @@ class PodcastPublisher:
         # tmp+rename here so the .md appears atomically only after it is
         # fully written.
         tmp_path = ep_path.with_suffix(ep_path.suffix + ".tmp")
-        tmp_path.write_text(
-            frontmatter + (executive_summary or ""), encoding="utf-8"
-        )
+        tmp_path.write_text(frontmatter + body + "\n", encoding="utf-8")
         os.replace(tmp_path, ep_path)
         logger.info("Wrote Astro episode: %s", ep_path)
         return ep_path

@@ -238,7 +238,27 @@ class TestAstroAudioUrl:
 
 
 class TestWriteAstroEpisode:
-    """PodcastPublisher._write_astro_episode() writes frontmatter + body."""
+    """PodcastPublisher._write_astro_episode() writes frontmatter + body.
+
+    These tests cover the post-fix renderer that takes a structured
+    show-notes dict (not a free-form executive summary) and renders
+    deterministically. The hyphen-killing regex from the old codepath
+    is gone — assertions pin that hyphens, lead-derived description,
+    and topic structure are all preserved by construction.
+    """
+
+    @staticmethod
+    def _sample_notes() -> dict:
+        return {
+            "lead": "Today's lead paragraph.",
+            "topics": [
+                {
+                    "headline": "Big story",
+                    "paragraph": "Body paragraph for the big story.",
+                    "verdict": "Sharp take.",
+                }
+            ],
+        }
 
     def test_writes_frontmatter_fields(self, tmp_path):
         path = PodcastPublisher._write_astro_episode(
@@ -248,23 +268,30 @@ class TestWriteAstroEpisode:
             formatted_date="April 11, 2026",
             duration=420.7,
             audio_url="/podcast/episodes/vaske_daily_2026-04-11.m4a",
-            executive_summary="## Today\n\nBig **news**.",
+            show_notes_obj=self._sample_notes(),
+            verdict_label="Вердикт "
+                          "Ваське",
             content_dir=tmp_path,
         )
         assert path == tmp_path / "vaske_daily-2026-04-11.md"
         md = path.read_text()
-        assert 'title: "Vaske Daily \u2014 April 11, 2026"' in md
+        assert 'title: "Vaske Daily — April 11, 2026"' in md
         assert "date: 2026-04-11" in md
         assert (
             'audioUrl: "/podcast/episodes/vaske_daily_2026-04-11.m4a"'
             in md
         )
         assert "duration: 421" in md  # rounded from 420.7
-        assert "## Today" in md
-        assert "Big **news**." in md
+        assert 'description: "Today\'s lead paragraph."' in md
+        assert "### Big story" in md
+        assert "Body paragraph for the big story." in md
+        assert (
+            "**Вердикт "
+            "Ваське:** Sharp take."
+        ) in md
 
-    def test_description_truncated_at_200_chars(self, tmp_path):
-        long = "Today " + "x" * 500
+    def test_description_preserves_hyphens(self, tmp_path):
+        """Pre-fix bug: a regex stripped hyphens from the description."""
         path = PodcastPublisher._write_astro_episode(
             podcast_name="p",
             date="2026-04-11",
@@ -272,21 +299,29 @@ class TestWriteAstroEpisode:
             formatted_date="April 11, 2026",
             duration=60,
             audio_url="/p/e.m4a",
-            executive_summary=long,
+            show_notes_obj={
+                "lead": (
+                    "Сегодня "
+                    "про ИИ-"
+                    "кодинг "
+                    "и open-source "
+                    "модели."
+                ),
+                "topics": [],
+            },
+            verdict_label="Verdict",
             content_dir=tmp_path,
         )
         md = path.read_text()
-        # Extract description line
-        desc_line = next(
-            ln for ln in md.splitlines() if ln.startswith("description:")
-        )
-        # Strip 'description: "' prefix and trailing '"'
-        desc = desc_line[len('description: "') : -1]
-        # Ellipsis added; body is <= 201 chars (200 + ellipsis)
-        assert desc.endswith("\u2026")
-        assert len(desc) <= 201
+        # Hyphens preserved verbatim (the bug collapsed them):
+        assert "ИИ-кодинг" in md
+        assert "open-source" in md
+        # The old collapsed forms must not appear:
+        assert "ИИкодинг" not in md
+        assert "opensource" not in md
 
-    def test_description_strips_markdown(self, tmp_path):
+    def test_description_pulled_only_from_lead(self, tmp_path):
+        """Topic-paragraph boilerplate cannot leak into description."""
         path = PodcastPublisher._write_astro_episode(
             podcast_name="p",
             date="2026-04-11",
@@ -294,17 +329,32 @@ class TestWriteAstroEpisode:
             formatted_date="April 11, 2026",
             duration=60,
             audio_url="/p/e.m4a",
-            executive_summary="## H\n\n**Bold** _em_ `code`.",
+            show_notes_obj={
+                "lead": "Clean teaser.",
+                "topics": [
+                    {
+                        "headline": "H",
+                        "paragraph": (
+                            "Вот "
+                            "executive-обзор. "
+                            "Факты, "
+                            "оценки, "
+                            "углы "
+                            "атаки."
+                        ),
+                        "verdict": "V.",
+                    }
+                ],
+            },
+            verdict_label="Verdict",
             content_dir=tmp_path,
         )
         md = path.read_text()
         desc_line = next(
             ln for ln in md.splitlines() if ln.startswith("description:")
         )
-        # Markdown chars stripped from the auto-description
-        assert "**" not in desc_line
-        assert "##" not in desc_line
-        assert "`" not in desc_line
+        assert desc_line == 'description: "Clean teaser."'
+        assert "executive-обзор" not in desc_line
 
     def test_escapes_quotes_in_title(self, tmp_path):
         path = PodcastPublisher._write_astro_episode(
@@ -314,16 +364,16 @@ class TestWriteAstroEpisode:
             formatted_date="April 11, 2026",
             duration=60,
             audio_url="/p/e.m4a",
-            executive_summary="Body.",
+            show_notes_obj=self._sample_notes(),
+            verdict_label="Verdict",
             content_dir=tmp_path,
         )
         md = path.read_text()
-        # YAML double-quote escaping: " → \"
-        assert r'title: "The \"Daily\" \u2014 April 11, 2026"' in md \
-            or 'title: "The \\"Daily\\" \u2014 April 11, 2026"' in md
+        # YAML double-quote escaping: " -> \"
+        assert r'title: "The \"Daily\" — April 11, 2026"' in md \
+            or 'title: "The \\"Daily\\" — April 11, 2026"' in md
 
-    def test_body_preserved_verbatim(self, tmp_path):
-        body = "## Section\n\n- item 1\n- item 2\n\n**bold** text."
+    def test_body_renders_topics_deterministically(self, tmp_path):
         path = PodcastPublisher._write_astro_episode(
             podcast_name="p",
             date="2026-04-11",
@@ -331,15 +381,25 @@ class TestWriteAstroEpisode:
             formatted_date="April 11, 2026",
             duration=60,
             audio_url="/p/e.m4a",
-            executive_summary=body,
+            show_notes_obj={
+                "lead": "Lead.",
+                "topics": [
+                    {"headline": "A", "paragraph": "PA.", "verdict": "VA."},
+                    {"headline": "B", "paragraph": "PB.", "verdict": "VB."},
+                ],
+            },
+            verdict_label="Verdict",
             content_dir=tmp_path,
         )
         md = path.read_text()
-        # Body appears after the closing --- line
         _, _, after = md.partition("---\n\n")
-        assert after == body
+        assert after == (
+            "Lead.\n\n"
+            "### A\n\nPA.\n\n**Verdict:** VA.\n\n"
+            "### B\n\nPB.\n\n**Verdict:** VB.\n"
+        )
 
-    def test_empty_executive_summary_writes_empty_body(self, tmp_path):
+    def test_empty_show_notes_writes_minimal_body(self, tmp_path):
         path = PodcastPublisher._write_astro_episode(
             podcast_name="p",
             date="2026-04-11",
@@ -347,13 +407,14 @@ class TestWriteAstroEpisode:
             formatted_date="April 11, 2026",
             duration=60,
             audio_url="/p/e.m4a",
-            executive_summary="",
+            show_notes_obj={"lead": "", "topics": []},
+            verdict_label="Verdict",
             content_dir=tmp_path,
         )
         md = path.read_text()
         assert 'description: ""' in md
         _, _, after = md.partition("---\n\n")
-        assert after == ""
+        assert after == "\n"
 
 
 class TestRunDestinationSync:

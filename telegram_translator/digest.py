@@ -287,6 +287,7 @@ class DigestPipeline:
                     results[podcast_name] = {
                         "source_summaries": {},
                         "executive_summary": "",
+                        "show_notes": "",
                         "podcast_script": "",
                     }
                     continue
@@ -335,6 +336,7 @@ class DigestPipeline:
                         results[podcast_name] = {
                             "source_summaries": {},
                             "executive_summary": "",
+                            "show_notes": "",
                             "podcast_script": "",
                         }
                         continue
@@ -397,6 +399,12 @@ class DigestPipeline:
                     prior_context=prior_context,
                 )
 
+                show_notes = await summarizer.generate_show_notes(
+                    executive,
+                    date,
+                    pcfg.get("show_notes_prompt") or None,
+                )
+
                 script = await summarizer.generate_podcast_script(
                     executive,
                     date,
@@ -408,6 +416,7 @@ class DigestPipeline:
                     podcast_name,
                     source_summaries=source_summaries,
                     executive_summary=executive,
+                    show_notes=show_notes,
                     podcast_script=script,
                     status="summarized",
                 )
@@ -415,6 +424,7 @@ class DigestPipeline:
                 results[podcast_name] = {
                     "source_summaries": source_summaries,
                     "executive_summary": executive,
+                    "show_notes": show_notes,
                     "podcast_script": script,
                 }
                 logger.info(
