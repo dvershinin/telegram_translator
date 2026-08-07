@@ -12,6 +12,13 @@ from typing import TYPE_CHECKING, Optional
 import openai
 
 from telegram_translator.content_store import ContentItem
+from telegram_translator.llm_env import (
+    DEFAULT_ROLE,
+    completion_kwargs,
+    is_deepseek,
+    require_role,
+    thinking_extra_body,
+)
 
 if TYPE_CHECKING:
     from telegram_translator.content_store import ContentStore
@@ -31,6 +38,27 @@ _DEFAULT_PODCAST_PROMPT = (
     "daily news podcast. Write as if speaking to the listener directly. "
     "Use smooth transitions between topics. Open with a greeting and date, "
     "close with a brief sign-off. Target ~1500 words (roughly 10 minutes)."
+)
+
+_DEFAULT_SHOW_NOTES_PROMPT = (
+    "You are producing listener-facing show notes for a daily podcast — "
+    "the polished text readers see on the show's website. "
+    "Read the executive briefing and produce clean, factual notes."
+    "\n\nMatch the language of the briefing (Russian briefing → Russian "
+    "notes; English briefing → English notes). Speak in the host's own "
+    "voice — informed, conversational, matter-of-fact."
+    "\n\nHard rules:"
+    "\n- Never name or hint at any source channel or publication. "
+    "If a source is mentioned in the briefing, drop the attribution."
+    "\n- Do NOT use host-direction scaffolding: no 'Executive-обзор', "
+    "'Тема:', 'Что случилось:', 'Почему это важно:', "
+    "'Угол для ведущего:', 'Вопрос к ведущему:', 'Скажу так:', "
+    "'What happened:', 'Why it matters:', 'Angle for host:'. These are "
+    "internal labels — never surface them."
+    "\n- Headlines are plain text only — no '#' characters, no '**' "
+    "markdown, no leading numbering."
+    "\n- The lead is a 1-2 sentence teaser for the entire episode, not a "
+    "preamble like 'Here is today's briefing.'"
 )
 
 _FACTUAL_ACCURACY_GUARDRAIL = (
@@ -72,17 +100,15 @@ class Summarizer:
         Raises:
             ValueError: If no API key is available.
         """
-        self.default_model = config.get("model", "gpt-4o")
-        self.selection_model = config.get(
-            "selection_model", self.default_model
-        )
-        self.summarization_model = config.get(
-            "summarization_model", self.default_model
-        )
-        self.executive_model = config.get(
-            "executive_model", self.default_model
-        )
-        self.script_model = config.get("script_model", self.default_model)
+        # The model is NOT read from config: the podcast names an LLM role and
+        # the role resolves from the environment. See telegram_translator.llm_env.
+        self.role = require_role(config.get("llm_role") or DEFAULT_ROLE)
+        self.uses_deepseek = is_deepseek(self.role.model)
+        self.default_model = self.role.model
+        self.selection_model = self.role.model
+        self.summarization_model = self.role.model
+        self.executive_model = self.role.model
+        self.script_model = self.role.model
 
         self.title = title
         self.host_name = host_name
@@ -95,19 +121,14 @@ class Summarizer:
         self.podcast_prompt = config.get(
             "podcast_prompt", _DEFAULT_PODCAST_PROMPT
         )
+        self.show_notes_prompt = config.get(
+            "show_notes_prompt", _DEFAULT_SHOW_NOTES_PROMPT
+        )
 
-        api_key_env = config.get("api_key_env") or "OPENAI_API_KEY"
-        api_key = os.getenv(api_key_env) or config.get("api_key")
-        if not api_key:
-            raise ValueError(
-                f"API key required for summarization. "
-                f"Set {api_key_env} or add api_key to podcast config."
-            )
-
-        self.api_base = config.get("api_base")
+        self.api_base = self.role.base_url
         self.client = openai.AsyncOpenAI(
-            api_key=api_key,
-            base_url=self.api_base or None,
+            api_key=self.role.api_key,
+            base_url=self.role.base_url,
         )
 
     def _make_cache_key(
@@ -181,8 +202,12 @@ class Summarizer:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            max_tokens=max_tokens,
-            temperature=temperature,
+            extra_body=thinking_extra_body(self.role),
+            **completion_kwargs(
+                use_model,
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            ),
         )
         result = response.choices[0].message.content.strip()
 
@@ -347,7 +372,7 @@ class Summarizer:
         bias_context = ""
         if source_bias:
             bias_context = (
-                f"\n\nEDITORIAL BIAS NOTE for '{source_name}': {source_bias} "
+                f"\n\nEDITORIAL BIAS NOTE about this source: {source_bias} "
                 "Account for this bias when summarizing — present facts "
                 "neutrally, flag claims that may reflect editorial slant "
                 "rather than verified reality, and avoid parroting "
@@ -355,16 +380,17 @@ class Summarizer:
             )
 
         system = (
-            f"You are summarizing content from the source '{source_name}'. "
+            "You are summarizing today's news items. "
             f"{source_prompt or ''} "
             "Produce a concise but thorough summary of the key developments. "
             "Use bullet points for individual items. "
-            f"Write in English.{bias_context}{_FACTUAL_ACCURACY_GUARDRAIL}"
+            "Write in English. "
+            "Never name or hint at the source publication or channel in "
+            "your output — speak in the host's own voice. "
+            f"{bias_context}{_FACTUAL_ACCURACY_GUARDRAIL}"
         )
 
-        user = (
-            f"Here are today's items from {source_name}:\n\n{all_content}"
-        )
+        user = f"Here are today's items:\n\n{all_content}"
 
         logger.info(
             "Summarizing %d items from %s (%d chars), model=%s",
@@ -405,18 +431,30 @@ class Summarizer:
         if not source_summaries:
             return "No content available for summary."
 
-        parts = []
-        for source, summary in source_summaries.items():
-            parts.append(f"## {source}\n\n{summary}")
-
+        # Source names are deliberately anonymized to `Source 1`,
+        # `Source 2`, ... before being shown to the LLM. This is the
+        # root-cause fix for source-channel name leaks into the
+        # executive summary (and downstream show notes / podcast
+        # script). The LLM never sees the brand name and so cannot
+        # echo it. Per-source bias keeps the same anonymized labels so
+        # the cross-referencing prompt still works.
+        ordered_sources = list(source_summaries.items())
+        alias_for = {
+            name: f"Source {idx + 1}"
+            for idx, (name, _summary) in enumerate(ordered_sources)
+        }
+        parts = [
+            f"## {alias_for[name]}\n\n{summary}"
+            for name, summary in ordered_sources
+        ]
         all_summaries = "\n\n---\n\n".join(parts)
 
         bias_block = ""
         if source_biases:
             bias_lines = [
-                f"- {name}: {bias}"
+                f"- {alias_for.get(name, name)}: {bias}"
                 for name, bias in source_biases.items()
-                if bias
+                if bias and name in alias_for
             ]
             if bias_lines:
                 bias_block = (
@@ -424,7 +462,9 @@ class Summarizer:
                     + "\n".join(bias_lines)
                     + "\n\nWhen sources report the same event differently, "
                     "note the discrepancy and present a balanced view. "
-                    "Do not adopt any single source's framing as truth."
+                    "Do not adopt any single source's framing as truth. "
+                    "Never name a source channel or publication in your "
+                    "output — speak in the host's own voice."
                 )
 
         guardrail = (
@@ -494,7 +534,7 @@ class Summarizer:
             "content only — no markdown, no formatting, no asterisks). "
             "Don't set a topic for the opening greeting or closing sign-off."
         )
-        if self.api_base:
+        if self.uses_deepseek:
             raw_prompt += (
                 "\n\nReturn a JSON object with this exact shape and nothing "
                 'else: {{"sections": [{{"topic": string|null, "text": '
@@ -533,7 +573,7 @@ class Summarizer:
                 logger.info("Cache hit for script, skipping API call")
                 return cached
 
-        if self.api_base:
+        if self.uses_deepseek:
             response_format = {"type": "json_object"}
         else:
             response_format = {
@@ -592,6 +632,156 @@ class Summarizer:
         if cache_key and self.store:
             self.store.set_llm_cache(
                 cache_key, "script", result, use_model,
+            )
+
+        return result
+
+    async def generate_show_notes(
+        self,
+        executive_summary: str,
+        date: str,
+        prompt: Optional[str] = None,
+    ) -> str:
+        """Generate listener-facing show notes from the executive summary.
+
+        Returns a JSON string with the shape consumed by
+        ``telegram_translator.show_notes``::
+
+            {"lead": str,
+             "topics": [{"headline": str,
+                         "paragraph": str,
+                         "verdict": str}, ...]}
+
+        This is a separate artifact from the executive summary (host
+        brief, internal scaffolding) and the podcast script (audio
+        monologue, may keep edgy host voice). The show notes are the
+        polished, clean text that lands on the public episode page.
+        Branches on ``self.uses_deepseek`` the same way ``generate_podcast_script``
+        does, because DeepSeek supports ``json_object`` but not strict
+        ``json_schema``.
+
+        Args:
+            executive_summary: The executive briefing text.
+            date: Date string (YYYY-MM-DD) for template substitution.
+            prompt: Optional per-podcast prompt override; falls back to
+                ``self.show_notes_prompt``.
+
+        Returns:
+            JSON string with the validated show-notes shape.
+        """
+        raw_prompt = prompt or self.show_notes_prompt
+        if self.uses_deepseek:
+            raw_prompt += (
+                "\n\nReturn a JSON object with this exact shape and "
+                'nothing else: {{"lead": string, "topics": '
+                '[{{"headline": string, "paragraph": string, "verdict": '
+                "string}}, ...]}}. No prose before or after the JSON."
+            )
+        template_vars = defaultdict(
+            str,
+            title=self.title,
+            host_name=self.host_name,
+            date=date,
+        )
+        system = raw_prompt.format_map(template_vars)
+
+        user = (
+            f"Date: {date}\n\n"
+            "Executive briefing to turn into listener-facing show "
+            f"notes:\n\n{executive_summary}"
+        )
+
+        logger.info(
+            "Generating show notes for %s, model=%s",
+            date,
+            self.script_model,
+        )
+
+        use_model = self.script_model
+
+        cache_key = self._make_cache_key(
+            "show_notes", system, user, use_model,
+        )
+
+        if cache_key and self.store:
+            cached = self.store.get_llm_cache(cache_key)
+            if cached is not None:
+                logger.info("Cache hit for show_notes, skipping API call")
+                return cached
+
+        if self.uses_deepseek:
+            response_format = {"type": "json_object"}
+        else:
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "show_notes",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "lead": {
+                                "type": "string",
+                                "description": (
+                                    "Short 1-2 sentence teaser for the "
+                                    "episode."
+                                ),
+                            },
+                            "topics": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "headline": {
+                                            "type": "string",
+                                            "description": (
+                                                "Plain-text headline. "
+                                                "No markdown."
+                                            ),
+                                        },
+                                        "paragraph": {
+                                            "type": "string",
+                                            "description": (
+                                                "Factual paragraph in "
+                                                "the host's voice."
+                                            ),
+                                        },
+                                        "verdict": {
+                                            "type": "string",
+                                            "description": (
+                                                "Single-line verdict in "
+                                                "the host's voice."
+                                            ),
+                                        },
+                                    },
+                                    "required": [
+                                        "headline", "paragraph", "verdict",
+                                    ],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["lead", "topics"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+
+        response = await self.client.chat.completions.create(
+            model=use_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=4096,
+            temperature=0.5,
+            response_format=response_format,
+        )
+        result = response.choices[0].message.content.strip()
+
+        if cache_key and self.store:
+            self.store.set_llm_cache(
+                cache_key, "show_notes", result, use_model,
             )
 
         return result

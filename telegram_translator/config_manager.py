@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from appdirs import user_data_dir, user_config_dir
 
+from telegram_translator.llm_env import DEFAULT_ROLE
+
 logger = logging.getLogger(__name__)
 
 # Keys that a destination-scoped podcast must NOT set in its per-podcast
@@ -449,11 +451,14 @@ class ConfigManager:
             "selection_prompt": cfg.get("selection_prompt", ""),
             "voice_profile": cfg.get("voice_profile", "default"),
             "language": cfg.get("language", "en"),
-            "model": cfg.get("model", "gpt-4o"),
-            "api_base": cfg.get("api_base"),
-            "api_key_env": cfg.get("api_key_env"),
+            # Model/provider are NOT configured here. A podcast names an LLM
+            # role; the role's model, base URL, and key resolve from the
+            # environment (see telegram_translator.llm_env).
+            "llm_role": cfg.get("llm_role", DEFAULT_ROLE),
             "executive_prompt": cfg.get("executive_prompt", ""),
             "podcast_prompt": cfg.get("podcast_prompt", ""),
+            "show_notes_prompt": cfg.get("show_notes_prompt", ""),
+            "verdict_label": cfg.get("verdict_label", ""),
             "voicebox_url": cfg.get(
                 "voicebox_url",
                 voicebox_cfg.get("url", "http://localhost:17493"),
@@ -620,9 +625,11 @@ class ConfigManager:
             "selection_prompt": "",
             "voice_profile": podcast_cfg.get("voice_profile", "default"),
             "language": podcast_cfg.get("language", "en"),
-            "model": digest_cfg.get("model", "gpt-4o"),
+            "llm_role": digest_cfg.get("llm_role", DEFAULT_ROLE),
             "executive_prompt": digest_cfg.get("executive_prompt", ""),
             "podcast_prompt": digest_cfg.get("podcast_prompt", ""),
+            "show_notes_prompt": digest_cfg.get("show_notes_prompt", ""),
+            "verdict_label": digest_cfg.get("verdict_label", ""),
             "voicebox_url": podcast_cfg.get(
                 "voicebox_url",
                 voicebox_cfg.get("url", "http://localhost:17493"),

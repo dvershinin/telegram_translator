@@ -3,6 +3,12 @@ from typing import Dict, Any
 from abc import ABC, abstractmethod
 import asyncio
 
+from telegram_translator.llm_env import (
+    completion_kwargs,
+    require_role,
+    thinking_extra_body,
+)
+
 logger = logging.getLogger(__name__)
 
 class BaseTranslator(ABC):
@@ -57,20 +63,22 @@ class OpenAITranslator(BaseTranslator):
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.api_key = config.get('api_key')
-        self.model = config.get('model', 'gpt-4o-mini')
+        # Model/provider/key come from an env-resolved role, never from config.
+        self.role = require_role(config.get('llm_role') or 'fast')
+        self.model = self.role.model
+        self.api_key = self.role.api_key
         self.max_tokens = config.get('max_tokens', 1000)
         self.temperature = config.get('temperature', 0.3)
-        self.system_prompt = config.get('system_prompt', 
+        self.system_prompt = config.get('system_prompt',
             "You are a professional translator. Translate the given text accurately while preserving meaning and tone. Respond with only the translated text.")
-        
-        if not self.api_key:
-            raise ValueError("OpenAI API key is required for OpenAI translator")
-        
+
         # Import openai here to avoid import errors if not installed
         try:
             import openai
-            self.client = openai.AsyncOpenAI(api_key=self.api_key)
+            self.client = openai.AsyncOpenAI(
+                api_key=self.role.api_key,
+                base_url=self.role.base_url,
+            )
         except ImportError:
             raise ImportError("OpenAI package is not installed. Run: pip install openai")
     
@@ -92,10 +100,14 @@ class OpenAITranslator(BaseTranslator):
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature
+                extra_body=thinking_extra_body(self.role),
+                **completion_kwargs(
+                    self.model,
+                    max_output_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                )
             )
-            
+
             translated_text = response.choices[0].message.content.strip()
             
             # Clean up the response (remove quotes, extra formatting, etc.)

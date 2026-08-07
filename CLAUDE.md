@@ -235,14 +235,21 @@ These prevent the LLM from generating filler about empty categories (e.g., "Scie
 
 ## LLM Providers (OpenAI-Compatible)
 
-Each podcast can route its LLM calls through any OpenAI-compatible endpoint via two optional config keys:
+**No model ID is ever written in source or in `config.yml`.** Each podcast names an LLM *role*:
 
-- `api_base` — overrides the default OpenAI endpoint (e.g. `https://api.deepseek.com`)
-- `api_key_env` — env var name holding the provider's API key (default `OPENAI_API_KEY`)
+```yaml
+podcasts:
+  vaske_daily:
+    llm_role: fast      # DeepSeek — see below
+```
 
-`vaske_daily` uses this to run everything through **DeepSeek** (`deepseek-chat`, env var `DEEPSEEK_API_KEY_PODCAST_MACHINE`) because OpenAI softens Russian profanity the Lebedev-tone script requires.
+A role resolves from the environment via `telegram_translator/llm_env.py`, reading `LLM_<ROLE>_MODEL`, `_BASE_URL`, `_API_KEY`, and the optional `_THINKING`. Those live in the `LLM model routing` block of `~/.secrets`, which `scripts/daily_podcasts.sh` sources before the cron run. Resolution **fails loud**: a missing or empty variable raises rather than silently defaulting, so a misconfigured pipeline stops instead of quietly billing the wrong model. Switching model or provider for every podcast is therefore one edit in one file.
 
-**DeepSeek quirk**: it supports `response_format: {"type": "json_object"}` but **not** `json_schema`. `summarizer.generate_podcast_script` branches on `self.api_base`: when set, it emits `json_object` mode with the schema described in-prompt; when unset, it uses OpenAI's strict `json_schema` path. Cache keys hash the full system+user+model, so a prompt or model change auto-invalidates stored LLM responses — no manual `--no-cache` needed.
+Roles in use: `writer` (crosswire, the_stack, scalable_stories), `fast` (vaske_daily). `vaske_daily` needs a DeepSeek-backed role because OpenAI softens the Russian profanity the Lebedev-tone script requires.
+
+**DeepSeek quirk**: it supports `response_format: {"type": "json_object"}` but **not** `json_schema`. `summarizer.generate_podcast_script` branches on `self.uses_deepseek` (derived from the resolved model, *not* from whether a base URL is set — every role now carries one): DeepSeek emits `json_object` mode with the schema described in-prompt, OpenAI uses the strict `json_schema` path. Cache keys hash the full system+user+model, so a prompt or model change auto-invalidates stored LLM responses — no manual `--no-cache` needed.
+
+**DeepSeek V4 trap**: omitting the `thinking` field means thinking is **ON**. `llm_env.thinking_extra_body` pins explicit intent on every DeepSeek request, defaulting to disabled, overridable per role via `LLM_<ROLE>_THINKING`.
 
 ## Structured Script Output
 

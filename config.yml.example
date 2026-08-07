@@ -20,8 +20,9 @@ translation:
   
   # OpenAI settings (when provider is "openai")
   openai:
-    api_key: ${OPENAI_API_KEY}  # or your actual OpenAI API key
-    model: "gpt-4o-mini"  # "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"
+    # No api_key / model here: both come from the LLM role named below.
+    # Roles live in the "LLM model routing" block of ~/.secrets.
+    llm_role: fast        # LLM_FAST_MODEL / _BASE_URL / _API_KEY / _THINKING
     max_tokens: 1000
     temperature: 0.3
     system_prompt: |
@@ -157,12 +158,12 @@ podcasts:
     selection_prompt: "Select articles about geopolitics, military, and economics"
     voice_profile: "angiebunny27"
     language: "en"
-    model: "gpt-4o"                        # default for all stages
-    # Per-stage model overrides (optional, fall back to model):
-    # selection_model: "gpt-4o-mini"       # content filtering (fast, cheap)
-    # summarization_model: "gpt-4o-mini"   # per-source summaries (extraction)
-    # executive_model: "gpt-4o"            # cross-source synthesis (reasoning)
-    # script_model: "gpt-4o"               # podcast script (creative writing)
+    llm_role: writer                       # model/provider/key from the env
+    # Model IDs are NEVER written here. `llm_role` selects one of the roles
+    # defined in the "LLM model routing" block of ~/.secrets, so switching
+    # model or provider for every podcast is a single edit in one place.
+    # Available roles: fast (high-volume, cheap), writer (long-form prose),
+    # reasoning (curation/review).
     executive_prompt: |
       You are a professional news analyst creating a daily executive briefing.
       Synthesize the source summaries into a cohesive overview of today's most
@@ -174,6 +175,16 @@ podcasts:
       daily news podcast. Write as if speaking to the listener directly.
       Use smooth transitions between topics. Open with a greeting and date,
       close with a brief sign-off. Target ~1500 words (roughly 10 minutes).
+    # show_notes_prompt: optional override for the listener-facing show-notes
+    # LLM stage (used by astro_collection publishers to write episode .md files).
+    # Returns structured JSON {lead, topics: [{headline, paragraph, verdict}]}.
+    # Sensible default is baked in — override only when the host voice differs.
+    # show_notes_prompt: |
+    #   You are producing listener-facing show notes for {title}. ...
+    # verdict_label: optional per-podcast label rendered as
+    # `**{verdict_label}:** {verdict}` after each topic paragraph.
+    # Defaults to "Verdict" when unset.
+    # verdict_label: "Verdict"
     audio:
       intro_bed: "./podcasts/assets/news_bed.wav"
       background_bed: "./podcasts/assets/background_bed.mp3"
@@ -206,11 +217,14 @@ podcasts:
   #   sources: [lenta]
   #   voice_profile: "default"
   #   language: "ru"
-  #   model: "gpt-4o"
+  #   llm_role: fast   # DeepSeek: OpenAI softens the Russian profanity
   #   executive_prompt: |
   #     ...
   #   podcast_prompt: |
   #     ...
+  #   show_notes_prompt: |
+  #     ...                                     # listener-facing notes (separate from edgy audio script)
+  #   verdict_label: "Вердикт Ваське"  # rendered after each topic paragraph
   #   publish:
   #     show_artwork: "./podcasts/vaske_daily/assets/artwork.jpg"
   #     show_description: "\u0412\u0430\u0441\u044c\u043a\u0435 \u0414\u0435\u0439\u043b\u0438"
@@ -227,7 +241,7 @@ podcasts:
   #     by returning only its displayed catalog number: 1.
   #   voice_profile: "default"
   #   language: "en"
-  #   model: "gpt-4o"
+  #   llm_role: writer
   #   executive_prompt: |
   #     Turn the supplied GetPageSpeed article into an accurate technical
   #     briefing. Preserve commands, configuration directives, versions, and
