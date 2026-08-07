@@ -18,6 +18,7 @@ from telegram_translator.llm_env import (
     completion_kwargs,
     is_deepseek,
     require_role,
+    strict_schema_base_url,
     thinking_extra_body,
 )
 
@@ -72,6 +73,85 @@ _FACTUAL_ACCURACY_GUARDRAIL = (
     '"new" if the source explicitly states it was just created or '
     "announced for the first time."
 )
+
+
+# Structured-output schemas. Shared by the OpenAI `json_schema` path and the
+# DeepSeek strict tool-call path, so both providers are held to the exact same
+# contract instead of one of them getting a prose description of it.
+PODCAST_SCRIPT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Topic name for a new major topic, or null for intro/outro."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Spoken content only — no markdown or formatting."
+                    }
+                },
+                "required": [
+                    "topic",
+                    "text"
+                ],
+                "additionalProperties": False
+            }
+        }
+    },
+    "required": [
+        "sections"
+    ],
+    "additionalProperties": False
+}
+
+SHOW_NOTES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "lead": {
+            "type": "string",
+            "description": "Short 1-2 sentence teaser for the episode."
+        },
+        "topics": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "headline": {
+                        "type": "string",
+                        "description": "Plain-text headline. No markdown."
+                    },
+                    "paragraph": {
+                        "type": "string",
+                        "description": "Factual paragraph in the host's voice."
+                    },
+                    "verdict": {
+                        "type": "string",
+                        "description": "Single-line verdict in the host's voice."
+                    }
+                },
+                "required": [
+                    "headline",
+                    "paragraph",
+                    "verdict"
+                ],
+                "additionalProperties": False
+            }
+        }
+    },
+    "required": [
+        "lead",
+        "topics"
+    ],
+    "additionalProperties": False
+}
 
 
 class Summarizer:
@@ -132,6 +212,17 @@ class Summarizer:
             base_url=self.role.base_url,
         )
 
+        # Structured output goes through a second client: DeepSeek only enforces
+        # `strict: true` on its /beta endpoint, and a client's base_url is fixed
+        # at construction. For non-DeepSeek providers this is the same URL, so
+        # the strict path can always use it.
+        strict_base = strict_schema_base_url(self.role.base_url)
+        self.strict_client = (
+            self.client
+            if strict_base == self.role.base_url
+            else openai.AsyncOpenAI(api_key=self.role.api_key, base_url=strict_base)
+        )
+
     @staticmethod
     def _date_for_prompt(date: str) -> str:
         """Render a digest date so the model never has to guess the weekday.
@@ -155,6 +246,102 @@ class Summarizer:
         except (TypeError, ValueError):
             return date
         return f"{date} ({parsed.strftime('%A')})"
+
+    async def _structured_chat(
+        self,
+        system: str,
+        user: str,
+        schema_name: str,
+        schema: dict,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+    ) -> str:
+        """Request JSON constrained by ``schema`` and return it as a string.
+
+        Both providers are held to the same schema, by different mechanisms:
+
+        * OpenAI accepts ``response_format: {"type": "json_schema", ...}``.
+        * DeepSeek rejects that outright ("This response_format type is
+          unavailable now") on both ``/v1`` and ``/beta``. Its only enforced
+          route is a **strict tool call**, and only on ``/beta`` — ``/v1``
+          silently ignores ``strict``. So the schema is presented as a forced
+          single-function tool and the arguments are the payload.
+
+        This replaces the previous DeepSeek path, which asked for
+        ``{"type": "json_object"}`` plus a prose description of the shape. That
+        mode is documented to "occasionally return empty content", which is
+        exactly the failure already seen elsewhere in the fleet.
+
+        Args:
+            system: System prompt.
+            user: User message.
+            schema_name: Name for the schema/function.
+            schema: JSON Schema the response must satisfy.
+            max_tokens: Output-token ceiling.
+            temperature: Sampling temperature.
+            model: Model identifier.
+
+        Returns:
+            The JSON payload as a string.
+
+        Raises:
+            ValueError: If the provider returns no usable structured payload.
+        """
+        shared = dict(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            extra_body=thinking_extra_body(self.role),
+            **completion_kwargs(
+                model, max_output_tokens=max_tokens, temperature=temperature
+            ),
+        )
+
+        if self.uses_deepseek:
+            response = await self.strict_client.chat.completions.create(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": schema_name,
+                            "description": f"Return the {schema_name} payload.",
+                            "strict": True,
+                            "parameters": schema,
+                        },
+                    }
+                ],
+                tool_choice={
+                    "type": "function",
+                    "function": {"name": schema_name},
+                },
+                **shared,
+            )
+            calls = response.choices[0].message.tool_calls
+            if not calls:
+                raise ValueError(
+                    f"{schema_name}: provider returned no tool call; "
+                    "cannot recover a structured payload"
+                )
+            return calls[0].function.arguments.strip()
+
+        response = await self.client.chat.completions.create(
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": True,
+                    "schema": schema,
+                },
+            },
+            **shared,
+        )
+        content = response.choices[0].message.content
+        if not content or not content.strip():
+            raise ValueError(f"{schema_name}: provider returned empty content")
+        return content.strip()
 
     def _make_cache_key(
         self,
@@ -559,12 +746,10 @@ class Summarizer:
             "content only — no markdown, no formatting, no asterisks). "
             "Don't set a topic for the opening greeting or closing sign-off."
         )
-        if self.uses_deepseek:
-            raw_prompt += (
-                "\n\nReturn a JSON object with this exact shape and nothing "
-                'else: {{"sections": [{{"topic": string|null, "text": '
-                'string}}, ...]}}. No prose before or after the JSON.'
-            )
+        # No shape description here: the schema is enforced by the provider (a
+        # strict tool call on DeepSeek, json_schema on OpenAI). Telling the model
+        # to emit "a JSON object and nothing else" would actively fight the tool
+        # call it is supposed to produce.
         template_vars = defaultdict(
             str,
             title=self.title,
@@ -598,60 +783,15 @@ class Summarizer:
                 logger.info("Cache hit for script, skipping API call")
                 return cached
 
-        if self.uses_deepseek:
-            response_format = {"type": "json_object"}
-        else:
-            response_format = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "podcast_script",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "sections": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "topic": {
-                                            "type": ["string", "null"],
-                                            "description": (
-                                                "Topic name for a new major "
-                                                "topic, or null for "
-                                                "intro/outro."
-                                            ),
-                                        },
-                                        "text": {
-                                            "type": "string",
-                                            "description": (
-                                                "Spoken content only — no "
-                                                "markdown or formatting."
-                                            ),
-                                        },
-                                    },
-                                    "required": ["topic", "text"],
-                                    "additionalProperties": False,
-                                },
-                            },
-                        },
-                        "required": ["sections"],
-                        "additionalProperties": False,
-                    },
-                },
-            }
-
-        response = await self.client.chat.completions.create(
-            model=use_model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+        result = await self._structured_chat(
+            system,
+            user,
+            "podcast_script",
+            PODCAST_SCRIPT_SCHEMA,
             max_tokens=8192,
             temperature=0.7,
-            response_format=response_format,
+            model=use_model,
         )
-        result = response.choices[0].message.content.strip()
 
         # Store in cache
         if cache_key and self.store:
@@ -681,9 +821,9 @@ class Summarizer:
         brief, internal scaffolding) and the podcast script (audio
         monologue, may keep edgy host voice). The show notes are the
         polished, clean text that lands on the public episode page.
-        Branches on ``self.uses_deepseek`` the same way ``generate_podcast_script``
-        does, because DeepSeek supports ``json_object`` but not strict
-        ``json_schema``.
+        Shape is enforced by ``SHOW_NOTES_SCHEMA`` through ``_structured_chat``,
+        which picks the right mechanism per provider: a strict tool call on
+        DeepSeek's ``/beta`` endpoint, ``json_schema`` on OpenAI.
 
         Args:
             executive_summary: The executive briefing text.
@@ -694,14 +834,9 @@ class Summarizer:
         Returns:
             JSON string with the validated show-notes shape.
         """
+        # Shape is enforced by SHOW_NOTES_SCHEMA via the provider, not described
+        # in prose. See _structured_chat.
         raw_prompt = prompt or self.show_notes_prompt
-        if self.uses_deepseek:
-            raw_prompt += (
-                "\n\nReturn a JSON object with this exact shape and "
-                'nothing else: {{"lead": string, "topics": '
-                '[{{"headline": string, "paragraph": string, "verdict": '
-                "string}}, ...]}}. No prose before or after the JSON."
-            )
         template_vars = defaultdict(
             str,
             title=self.title,
@@ -734,75 +869,15 @@ class Summarizer:
                 logger.info("Cache hit for show_notes, skipping API call")
                 return cached
 
-        if self.uses_deepseek:
-            response_format = {"type": "json_object"}
-        else:
-            response_format = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "show_notes",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "lead": {
-                                "type": "string",
-                                "description": (
-                                    "Short 1-2 sentence teaser for the "
-                                    "episode."
-                                ),
-                            },
-                            "topics": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "headline": {
-                                            "type": "string",
-                                            "description": (
-                                                "Plain-text headline. "
-                                                "No markdown."
-                                            ),
-                                        },
-                                        "paragraph": {
-                                            "type": "string",
-                                            "description": (
-                                                "Factual paragraph in "
-                                                "the host's voice."
-                                            ),
-                                        },
-                                        "verdict": {
-                                            "type": "string",
-                                            "description": (
-                                                "Single-line verdict in "
-                                                "the host's voice."
-                                            ),
-                                        },
-                                    },
-                                    "required": [
-                                        "headline", "paragraph", "verdict",
-                                    ],
-                                    "additionalProperties": False,
-                                },
-                            },
-                        },
-                        "required": ["lead", "topics"],
-                        "additionalProperties": False,
-                    },
-                },
-            }
-
-        response = await self.client.chat.completions.create(
-            model=use_model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+        result = await self._structured_chat(
+            system,
+            user,
+            "show_notes",
+            SHOW_NOTES_SCHEMA,
             max_tokens=4096,
             temperature=0.5,
-            response_format=response_format,
+            model=use_model,
         )
-        result = response.choices[0].message.content.strip()
 
         if cache_key and self.store:
             self.store.set_llm_cache(

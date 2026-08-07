@@ -100,6 +100,38 @@ def thinking_extra_body(
     return body
 
 
+def strict_schema_base_url(base_url: str) -> str:
+    """Return the base URL that actually enforces strict tool schemas.
+
+    DeepSeek only honours ``strict: true`` on a function schema when the request
+    goes to its ``/beta`` endpoint. Characterised live 2026-08-07: a schema that
+    violates strict-mode rules (a property missing from ``required``) is
+    **rejected** on ``/beta`` with "Required properties must match all
+    properties in the object", but **silently accepted** on ``/v1``, which
+    returns unconstrained output. Sending ``strict`` to ``/v1`` therefore buys
+    nothing while looking like a guarantee.
+
+    Note this is about *tool* schemas. ``response_format: {"type":
+    "json_schema"}`` is rejected on both endpoints with "This response_format
+    type is unavailable now", so strict tool calling is the only route to an
+    enforced schema on DeepSeek.
+
+    Args:
+        base_url: The role's configured base URL.
+
+    Returns:
+        The ``/beta`` variant for DeepSeek hosts, otherwise ``base_url``.
+    """
+    if "deepseek" not in base_url.casefold():
+        return base_url
+    trimmed = base_url.rstrip("/")
+    for suffix in ("/v1", "/beta"):
+        if trimmed.endswith(suffix):
+            trimmed = trimmed[: -len(suffix)]
+            break
+    return f"{trimmed}/beta"
+
+
 def pins_default_temperature(model: object) -> bool:
     """Report whether a model rejects any explicit ``temperature``.
 

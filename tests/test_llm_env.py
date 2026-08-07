@@ -213,3 +213,81 @@ class TestDateForPrompt:
         from telegram_translator.summarizer import Summarizer
 
         assert Summarizer._date_for_prompt(bad) == bad
+
+
+class TestStrictSchemaBaseUrl:
+    """DeepSeek only ENFORCES `strict: true` on /beta.
+
+    Characterised live 2026-08-07: a schema violating strict-mode rules (a
+    property missing from `required`) is rejected on /beta with "Required
+    properties must match all properties in the object", but silently
+    ACCEPTED on /v1, which then returns unconstrained output. Sending
+    `strict` to /v1 buys nothing while looking like a guarantee.
+    """
+
+    @pytest.mark.parametrize(
+        "base,expected",
+        [
+            ("https://api.deepseek.com/v1", "https://api.deepseek.com/beta"),
+            ("https://api.deepseek.com", "https://api.deepseek.com/beta"),
+            ("https://api.deepseek.com/v1/", "https://api.deepseek.com/beta"),
+            # already beta: must stay beta, not become /beta/beta
+            ("https://api.deepseek.com/beta", "https://api.deepseek.com/beta"),
+        ],
+    )
+    def test_deepseek_urls_are_routed_to_beta(self, base, expected):
+        from telegram_translator.llm_env import strict_schema_base_url
+
+        assert strict_schema_base_url(base) == expected
+
+    @pytest.mark.parametrize(
+        "base",
+        [
+            "https://api.openai.com/v1",
+            "https://gateway.ai.cloudflare.com/v1/acct/gw/openai",
+        ],
+    )
+    def test_non_deepseek_urls_are_untouched(self, base):
+        from telegram_translator.llm_env import strict_schema_base_url
+
+        assert strict_schema_base_url(base) == base
+
+
+class TestStructuredSchemas:
+    """The two schemas must stay valid for DeepSeek strict mode."""
+
+    @pytest.mark.parametrize("schema_name", ["PODCAST_SCRIPT_SCHEMA", "SHOW_NOTES_SCHEMA"])
+    def test_every_property_is_required_and_closed(self, schema_name):
+        """Strict mode rejects objects whose `required` omits any property."""
+        import telegram_translator.summarizer as s
+
+        schema = getattr(s, schema_name)
+
+        def check(node, path="root"):
+            if not isinstance(node, dict):
+                return
+            if node.get("type") == "object":
+                props = set(node.get("properties", {}))
+                required = set(node.get("required", []))
+                assert props == required, (
+                    f"{path}: strict mode needs required == properties, "
+                    f"missing {sorted(props - required)}"
+                )
+                assert node.get("additionalProperties") is False, (
+                    f"{path}: strict mode needs additionalProperties: False"
+                )
+                for key, child in node.get("properties", {}).items():
+                    check(child, f"{path}.{key}")
+            if node.get("type") == "array":
+                check(node.get("items", {}), f"{path}[]")
+
+        check(schema)
+
+    def test_topic_stays_nullable(self):
+        """Intro/outro sections carry topic=null; losing that breaks TTS grouping."""
+        import telegram_translator.summarizer as s
+
+        topic = s.PODCAST_SCRIPT_SCHEMA["properties"]["sections"]["items"][
+            "properties"
+        ]["topic"]
+        assert "null" in topic["type"]
