@@ -252,6 +252,10 @@ Roles in use: `writer` (crosswire, the_stack, scalable_stories), `fast` (vaske_d
 
 **DeepSeek V4 trap**: omitting the `thinking` field means thinking is **ON**. `llm_env.thinking_extra_body` pins explicit intent on every DeepSeek request, defaulting to disabled, overridable per role via `LLM_<ROLE>_THINKING`.
 
+Every completed DeepSeek response is passed to `llm_usage.py`, which posts only
+request ID, model, timestamp, project/call-site, and exact token counters to the
+local llm-usage ledger. Missing cache-hit/cache-miss counters are never estimated.
+
 ## Structured Script Output
 
 The podcast script uses OpenAI structured output (JSON schema) to separate topic names from spoken text:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import re
 from collections import defaultdict
 from datetime import datetime
@@ -21,6 +20,7 @@ from telegram_translator.llm_env import (
     strict_schema_base_url,
     thinking_extra_body,
 )
+from telegram_translator.llm_usage import record_deepseek_usage
 
 if TYPE_CHECKING:
     from telegram_translator.content_store import ContentStore
@@ -87,29 +87,21 @@ PODCAST_SCRIPT_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "topic": {
-                        "type": [
-                            "string",
-                            "null"
-                        ],
-                        "description": "Topic name for a new major topic, or null for intro/outro."
+                        "type": ["string", "null"],
+                        "description": "Topic name for a new major topic, or null for intro/outro.",
                     },
                     "text": {
                         "type": "string",
-                        "description": "Spoken content only — no markdown or formatting."
-                    }
+                        "description": "Spoken content only — no markdown or formatting.",
+                    },
                 },
-                "required": [
-                    "topic",
-                    "text"
-                ],
-                "additionalProperties": False
-            }
+                "required": ["topic", "text"],
+                "additionalProperties": False,
+            },
         }
     },
-    "required": [
-        "sections"
-    ],
-    "additionalProperties": False
+    "required": ["sections"],
+    "additionalProperties": False,
 }
 
 SHOW_NOTES_SCHEMA = {
@@ -117,7 +109,7 @@ SHOW_NOTES_SCHEMA = {
     "properties": {
         "lead": {
             "type": "string",
-            "description": "Short 1-2 sentence teaser for the episode."
+            "description": "Short 1-2 sentence teaser for the episode.",
         },
         "topics": {
             "type": "array",
@@ -126,31 +118,24 @@ SHOW_NOTES_SCHEMA = {
                 "properties": {
                     "headline": {
                         "type": "string",
-                        "description": "Plain-text headline. No markdown."
+                        "description": "Plain-text headline. No markdown.",
                     },
                     "paragraph": {
                         "type": "string",
-                        "description": "Factual paragraph in the host's voice."
+                        "description": "Factual paragraph in the host's voice.",
                     },
                     "verdict": {
                         "type": "string",
-                        "description": "Single-line verdict in the host's voice."
-                    }
+                        "description": "Single-line verdict in the host's voice.",
+                    },
                 },
-                "required": [
-                    "headline",
-                    "paragraph",
-                    "verdict"
-                ],
-                "additionalProperties": False
-            }
-        }
+                "required": ["headline", "paragraph", "verdict"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": [
-        "lead",
-        "topics"
-    ],
-    "additionalProperties": False
+    "required": ["lead", "topics"],
+    "additionalProperties": False,
 }
 
 
@@ -199,9 +184,7 @@ class Summarizer:
         self.executive_prompt = config.get(
             "executive_prompt", _DEFAULT_EXECUTIVE_PROMPT
         )
-        self.podcast_prompt = config.get(
-            "podcast_prompt", _DEFAULT_PODCAST_PROMPT
-        )
+        self.podcast_prompt = config.get("podcast_prompt", _DEFAULT_PODCAST_PROMPT)
         self.show_notes_prompt = config.get(
             "show_notes_prompt", _DEFAULT_SHOW_NOTES_PROMPT
         )
@@ -319,6 +302,12 @@ class Summarizer:
                 },
                 **shared,
             )
+            record_deepseek_usage(
+                response,
+                requested_model=model,
+                project="telegram-translator",
+                callsite=f"digest.structured.{schema_name}",
+            )
             calls = response.choices[0].message.tool_calls
             if not calls:
                 raise ValueError(
@@ -337,6 +326,12 @@ class Summarizer:
                 },
             },
             **shared,
+        )
+        record_deepseek_usage(
+            response,
+            requested_model=model,
+            project="telegram-translator",
+            callsite=f"digest.structured.{schema_name}",
         )
         content = response.choices[0].message.content
         if not content or not content.strip():
@@ -403,9 +398,7 @@ class Summarizer:
             cached = self.store.get_llm_cache(cache_key)
             if cached is not None:
                 stage = cache_key.split(":")[0]
-                logger.info(
-                    "Cache hit for %s, skipping API call", stage
-                )
+                logger.info("Cache hit for %s, skipping API call", stage)
                 return cached
 
         response = await self.client.chat.completions.create(
@@ -421,11 +414,17 @@ class Summarizer:
                 temperature=temperature,
             ),
         )
+        stage = cache_key.split(":")[0] if cache_key else "uncached"
+        record_deepseek_usage(
+            response,
+            requested_model=use_model,
+            project="telegram-translator",
+            callsite=f"digest.{stage}",
+        )
         result = response.choices[0].message.content.strip()
 
         # Store in cache
         if cache_key and self.store:
-            stage = cache_key.split(":")[0]
             self.store.set_llm_cache(cache_key, stage, result, use_model)
 
         return result
@@ -458,7 +457,9 @@ class Summarizer:
         all_selected: list[ContentItem] = []
         for source_name, source_items in by_source.items():
             selected = await self._select_batch(
-                source_items, selection_prompt, source_name,
+                source_items,
+                selection_prompt,
+                source_name,
             )
             all_selected.extend(selected)
 
@@ -490,9 +491,7 @@ class Summarizer:
         for i, item in enumerate(items, 1):
             title = item.title or "(no title)"
             preview = item.content[:400].replace("\n", " ")
-            catalog_lines.append(
-                f"{i}. {title} — {preview}"
-            )
+            catalog_lines.append(f"{i}. {title} — {preview}")
         catalog = "\n".join(catalog_lines)
 
         system = (
@@ -517,8 +516,11 @@ class Summarizer:
         )
 
         cache_key = self._make_cache_key(
-            "selection", system, user,
-            self.selection_model, extra=source_name,
+            "selection",
+            system,
+            user,
+            self.selection_model,
+            extra=source_name,
         )
         response = await self._chat(
             system,
@@ -531,7 +533,8 @@ class Summarizer:
 
         if response.strip().upper() == "NONE":
             logger.info(
-                "No articles selected from %s", source_name,
+                "No articles selected from %s",
+                source_name,
             )
             return []
 
@@ -544,7 +547,9 @@ class Summarizer:
         selected = [items[i - 1] for i in sorted(selected_indices)]
         logger.info(
             "Selected %d/%d from %s",
-            len(selected), len(items), source_name,
+            len(selected),
+            len(items),
+            source_name,
         )
         return selected
 
@@ -613,11 +618,16 @@ class Summarizer:
         )
 
         cache_key = self._make_cache_key(
-            "source_summary", system, user,
-            self.summarization_model, extra=source_name,
+            "source_summary",
+            system,
+            user,
+            self.summarization_model,
+            extra=source_name,
         )
         return await self._chat(
-            system, user, model=self.summarization_model,
+            system,
+            user,
+            model=self.summarization_model,
             cache_key=cache_key,
         )
 
@@ -656,8 +666,7 @@ class Summarizer:
             for idx, (name, _summary) in enumerate(ordered_sources)
         }
         parts = [
-            f"## {alias_for[name]}\n\n{summary}"
-            for name, summary in ordered_sources
+            f"## {alias_for[name]}\n\n{summary}" for name, summary in ordered_sources
         ]
         all_summaries = "\n\n---\n\n".join(parts)
 
@@ -691,10 +700,7 @@ class Summarizer:
         )
         system = (prompt or self.executive_prompt) + bias_block + guardrail
 
-        user = (
-            "Here are the individual source summaries for today:\n\n"
-            f"{all_summaries}"
-        )
+        user = f"Here are the individual source summaries for today:\n\n{all_summaries}"
 
         if prior_context:
             user += f"\n\n---\n\n{prior_context}"
@@ -706,10 +712,16 @@ class Summarizer:
         )
 
         cache_key = self._make_cache_key(
-            "executive", system, user, self.executive_model,
+            "executive",
+            system,
+            user,
+            self.executive_model,
         )
         return await self._chat(
-            system, user, max_tokens=4096, model=self.executive_model,
+            system,
+            user,
+            max_tokens=4096,
+            model=self.executive_model,
             cache_key=cache_key,
         )
 
@@ -773,7 +785,10 @@ class Summarizer:
         use_model = self.script_model
 
         cache_key = self._make_cache_key(
-            "script", system, user, use_model,
+            "script",
+            system,
+            user,
+            use_model,
         )
 
         # Check cache
@@ -796,7 +811,10 @@ class Summarizer:
         # Store in cache
         if cache_key and self.store:
             self.store.set_llm_cache(
-                cache_key, "script", result, use_model,
+                cache_key,
+                "script",
+                result,
+                use_model,
             )
 
         return result
@@ -860,7 +878,10 @@ class Summarizer:
         use_model = self.script_model
 
         cache_key = self._make_cache_key(
-            "show_notes", system, user, use_model,
+            "show_notes",
+            system,
+            user,
+            use_model,
         )
 
         if cache_key and self.store:
@@ -881,7 +902,10 @@ class Summarizer:
 
         if cache_key and self.store:
             self.store.set_llm_cache(
-                cache_key, "show_notes", result, use_model,
+                cache_key,
+                "show_notes",
+                result,
+                use_model,
             )
 
         return result
