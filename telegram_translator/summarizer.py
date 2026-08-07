@@ -7,6 +7,7 @@ import logging
 import os
 import re
 from collections import defaultdict
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 import openai
@@ -130,6 +131,30 @@ class Summarizer:
             api_key=self.role.api_key,
             base_url=self.role.base_url,
         )
+
+    @staticmethod
+    def _date_for_prompt(date: str) -> str:
+        """Render a digest date so the model never has to guess the weekday.
+
+        Hosts naturally open with "It's Thursday, August 7th". Given only
+        ``2026-08-07`` a model will invent the day name, and on 2026-08-07 one
+        did: it said Thursday for a Friday. The weekday is stated explicitly so
+        the script cannot be wrong about it. The ISO form is kept alongside so
+        anything that reads the date out of the prompt still finds it, and the
+        weekday is given in English because every prompt already instructs the
+        model to match the briefing's language.
+
+        Args:
+            date: Digest date in ``YYYY-MM-DD`` form.
+
+        Returns:
+            ``"2026-08-07 (Friday)"``, or the input unchanged if unparseable.
+        """
+        try:
+            parsed = datetime.strptime(date, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            return date
+        return f"{date} ({parsed.strftime('%A')})"
 
     def _make_cache_key(
         self,
@@ -544,7 +569,7 @@ class Summarizer:
             str,
             title=self.title,
             host_name=self.host_name,
-            date=date,
+            date=self._date_for_prompt(date),
         )
         system = raw_prompt.format_map(template_vars)
 
@@ -681,7 +706,7 @@ class Summarizer:
             str,
             title=self.title,
             host_name=self.host_name,
-            date=date,
+            date=self._date_for_prompt(date),
         )
         system = raw_prompt.format_map(template_vars)
 

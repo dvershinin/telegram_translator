@@ -179,3 +179,37 @@ def test_no_hardcoded_model_identifiers_in_source(filename):
         "Hardcoded model identifier(s) found. Resolve a role via "
         "llm_env.require_role() instead:\n  " + "\n  ".join(offenders)
     )
+
+
+class TestDateForPrompt:
+    """The script must never guess the weekday.
+
+    On 2026-08-07 a generated crosswire script opened with "It's Thursday,
+    August 7th, 2026". That date is a Friday. The prompt had only the ISO
+    date, so the model invented the day name.
+    """
+
+    def test_appends_the_real_weekday(self):
+        from telegram_translator.summarizer import Summarizer
+
+        assert Summarizer._date_for_prompt("2026-08-07") == "2026-08-07 (Friday)"
+
+    @pytest.mark.parametrize(
+        "date,weekday",
+        [
+            ("2026-08-03", "Monday"),
+            ("2026-08-08", "Saturday"),
+            ("2026-08-09", "Sunday"),
+            ("2026-01-01", "Thursday"),
+        ],
+    )
+    def test_weekday_matches_the_calendar(self, date, weekday):
+        from telegram_translator.summarizer import Summarizer
+
+        assert Summarizer._date_for_prompt(date) == f"{date} ({weekday})"
+
+    @pytest.mark.parametrize("bad", ["", "not-a-date", "07/08/2026", None])
+    def test_unparseable_input_passes_through(self, bad):
+        from telegram_translator.summarizer import Summarizer
+
+        assert Summarizer._date_for_prompt(bad) == bad
