@@ -1,0 +1,23 @@
+version: 2.1
+
+jobs:
+  tests:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: python -m pip install --disable-pip-version-check --editable '.[dev]'
+      - run:
+          name: Run hermetic test suite
+          command: |
+            for variable in "${!LLM_@}"; do
+              unset "$variable"
+            done
+            python -m pytest tests/ -q
+
+workflows:
+  test:
+    jobs:
+      - tests

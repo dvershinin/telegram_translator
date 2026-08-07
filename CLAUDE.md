@@ -183,12 +183,13 @@ The feed generator (`feed_generator.py`) targets Apple Podcasts spec compliance.
 - Dark theme, mobile-friendly, inline audio player, collapsible show notes
 - Episode summaries converted from Markdown to HTML via `_markdown_to_html()`
 
-## Tests
+## Testing
 
 ```bash
-python3 -m pytest tests/ -v
+bash -c 'for variable in "${!LLM_@}"; do unset "$variable"; done; exec ~/.virtualenvs/telegram_translator/bin/python -m pytest tests/ -q'
 ```
 
+- Keep every `LLM_*` role variable unset so hermeticity and the hardcoded-model ratchet are exercised.
 - `tests/test_feed_generator.py` — 43 tests covering Apple-required/recommended tags, CDATA wrapping, Markdown-to-HTML conversion, episode numbering, validation
 
 ## Database

@@ -1,5 +1,6 @@
 # Configuration files (contain sensitive data)
 config.yml
+!/.myci/config.yml
 channels.yml
 .env
 
