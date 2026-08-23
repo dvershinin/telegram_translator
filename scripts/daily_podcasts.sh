@@ -9,6 +9,7 @@ STATE_DIR="$HOME/Library/Application Support/telegram_translator"
 SUCCESS_FILE="$STATE_DIR/daily-podcasts-success-date"
 LOCK_FILE="$STATE_DIR/daily-podcasts.lock"
 KEYCHAIN_FILE="$HOME/Library/Keychains/login.keychain-db"
+CONTENT_DB="${CONTENT_DB:-$STATE_DIR/databases/content_store.db}"
 SECURITY_BIN="${SECURITY_BIN:-/usr/bin/security}"
 MCP_DEV="${MCP_DEV:-/Users/danila/.virtualenvs/mcps/bin/mcp-dev}"
 CLI="python3 -m telegram_translator.cli"
@@ -40,9 +41,35 @@ alert_failures() {
         --arg "working_directory=$PROJECT_DIR"
 }
 
+podcast_already_published() {
+    local name="$1"
+    local today="$2"
+    python3 -c '
+import sqlite3
+import sys
+
+database, date, podcast = sys.argv[1:]
+try:
+    row = sqlite3.connect(database).execute(
+        "SELECT status FROM digests WHERE date = ? AND podcast_name = ?",
+        (date, podcast),
+    ).fetchone()
+except sqlite3.Error:
+    raise SystemExit(1)
+raise SystemExit(0 if row and row[0] == "published" else 1)
+' "$CONTENT_DB" "$today" "$name"
+}
+
 run_podcast() {
     local name="$1"
+    local today
     local wordpress_credentials=0
+    today="$(date +%Y-%m-%d)"
+
+    if podcast_already_published "$name" "$today"; then
+        echo "podcast $name already published for $today; skipping"
+        return 0
+    fi
 
     if [ "$name" = "scalable_stories" ]; then
         if ! GPS_WP_APP_PASSWORD="$("$SECURITY_BIN" find-generic-password \

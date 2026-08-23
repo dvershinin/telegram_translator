@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 
 
@@ -38,6 +39,7 @@ def test_scheduled_runner_retries_safely_and_alerts_on_failure() -> None:
     assert 'if [ -n "$PIPELINE_FAILURES" ]' in SCRIPT
     assert "alert_failures || true" in SCRIPT
     assert "return 1" in SCRIPT
+    assert 'podcast_already_published "$name" "$today"' in SCRIPT
 
 
 def test_keychain_failure_is_recorded_and_uses_explicit_file(tmp_path: Path) -> None:
@@ -55,11 +57,13 @@ def test_keychain_failure_is_recorded_and_uses_explicit_file(tmp_path: Path) -> 
             "bash",
             "-c",
             'source "$1"; SECURITY_BIN="$2"; KEYCHAIN_FILE="$3"; '
+            'CONTENT_DB="$4"; '
             'run_podcast scalable_stories; printf "%s" "$PIPELINE_FAILURES"',
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
             str(security),
             "/tmp/login.keychain-db",
+            str(tmp_path / "missing-content.sqlite"),
         ],
         check=True,
         capture_output=True,
@@ -99,3 +103,48 @@ def test_failure_alert_calls_system_mcp(tmp_path: Path) -> None:
     assert "Daily podcast pipeline failed" in args
     assert "retry hourly through 23:00" in args
     assert "working_directory=/Users/danila/Projects/telegram_translator" in args
+
+
+def test_published_podcast_is_detected_from_authoritative_digest(
+    tmp_path: Path,
+) -> None:
+    """A retry skips a show whose same-date digest is already published."""
+    database = tmp_path / "content.sqlite"
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "CREATE TABLE digests (date TEXT, podcast_name TEXT, status TEXT)"
+    )
+    connection.execute(
+        "INSERT INTO digests VALUES (?, ?, ?)",
+        ("2026-08-24", "scalable_stories", "published"),
+    )
+    connection.commit()
+    connection.close()
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; CONTENT_DB="$2"; '
+            'podcast_already_published scalable_stories 2026-08-24',
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
+            str(database),
+        ],
+        check=False,
+    )
+    assert result.returncode == 0
+
+    missing = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; CONTENT_DB="$2"; '
+            'podcast_already_published crosswire 2026-08-24',
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
+            str(database),
+        ],
+        check=False,
+    )
+    assert missing.returncode == 1
