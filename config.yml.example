@@ -255,6 +255,8 @@ podcasts:
   #     Write for speech: expand abbreviations and initialisms into their full
   #     spoken forms, say version numbers naturally, and call NGINX "Engine X"
   #     outside exact commands, package names, directives, and URLs.
+  #   audio:
+  #     intro_bed: "./podcasts/scalable_stories/assets/show_opener.wav"
   #   output_dir: "./podcasts/scalable_stories"
   #   publish:
   #     series_id: 456
