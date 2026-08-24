@@ -252,6 +252,9 @@ podcasts:
   #     and developers. Never invent commands or claims. Open with the problem
   #     the listener will solve, teach the solution conversationally, and end
   #     by inviting the listener to read the full article on GetPageSpeed.
+  #     Write for speech: expand abbreviations and initialisms into their full
+  #     spoken forms, say version numbers naturally, and call NGINX "Engine X"
+  #     outside exact commands, package names, directives, and URLs.
   #   output_dir: "./podcasts/scalable_stories"
   #   publish:
   #     series_id: 456

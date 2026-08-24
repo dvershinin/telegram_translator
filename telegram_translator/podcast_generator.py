@@ -27,6 +27,11 @@ _RU_CLITIC_RE = re.compile(
     r"([а-яёА-ЯЁ])-(то|нибудь|либо|ка|таки)\b"
 )
 
+# NGINX's canonical spoken form is "Engine X".  Keep the readable script and
+# literal commands untouched, but normalize the text handed to English TTS so
+# every backend receives an unambiguous pronunciation cue.
+_NGINX_RE = re.compile(r"\bnginx\b", re.IGNORECASE)
+
 
 def _glue_ru_clitics(text: str) -> str:
     """Glue Russian clitic particles to their host word for cleaner TTS.
@@ -45,6 +50,22 @@ def _glue_ru_clitics(text: str) -> str:
         Text with clitic particles glued to their host words.
     """
     return _RU_CLITIC_RE.sub(r"\1\2", text)
+
+
+def _prepare_tts_text(text: str, language: str) -> str:
+    """Normalize written script text for the selected spoken language.
+
+    Args:
+        text: Script segment about to be sent to Voicebox.
+        language: ISO language code for the segment.
+
+    Returns:
+        A pronunciation-oriented copy of the text. The saved readable script
+        remains unchanged.
+    """
+    if language == "en":
+        return _NGINX_RE.sub("Engine X", text)
+    return _glue_ru_clitics(text)
 
 
 def split_script(text: str, max_chars: int = 500) -> list[str]:
@@ -624,10 +645,7 @@ class PodcastGenerator:
         Raises:
             RuntimeError: If generation fails.
         """
-        # Phonetic respell for Russian: glue clitic particles to host
-        # words so the TTS produces correct unstressed prosody.
-        # No-op for non-Russian text (regex won't match Latin).
-        text = _glue_ru_clitics(text)
+        text = _prepare_tts_text(text, self.language)
 
         # Check TTS cache
         cached = self._tts_cache_path(text)

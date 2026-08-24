@@ -8,6 +8,7 @@ import pytest
 
 from telegram_translator.content_store import ContentItem
 from telegram_translator.podcast_generator import (
+    _prepare_tts_text,
     parse_structured_sections,
     sections_to_readable,
     split_script_by_topics,
@@ -152,6 +153,21 @@ class TestLegacyFallback:
         segments, boundaries = split_script_by_topics(script)
         assert len(segments) == 1
         assert boundaries == set()
+
+
+class TestTTSPreparation:
+    """Pronunciation-only normalization before Voicebox synthesis."""
+
+    def test_english_nginx_uses_canonical_spoken_form(self):
+        """NGINX is spoken as Engine X regardless of written casing."""
+        text = "NGINX, nginx.conf, and an nginx package."
+        assert _prepare_tts_text(text, "en") == (
+            "Engine X, Engine X.conf, and an Engine X package."
+        )
+
+    def test_non_english_text_does_not_rewrite_nginx(self):
+        """English brand pronunciation must not alter other languages."""
+        assert _prepare_tts_text("NGINX", "ru") == "NGINX"
 
 
 def _make_show_notes(
