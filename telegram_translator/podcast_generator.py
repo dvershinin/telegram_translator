@@ -422,7 +422,14 @@ class PodcastGenerator:
 
         while len(looped) < target_samples:
             if looped and crossfade_samples > 0:
-                cf_len = min(crossfade_samples, len(looped), len(clip))
+                # Always leave at least one new sample to append. Without
+                # this bound, a clip no longer than the crossfade window
+                # replaces its entire previous copy and the loop never grows.
+                cf_len = min(
+                    crossfade_samples,
+                    len(looped),
+                    max(0, len(clip) - 1),
+                )
                 for j in range(cf_len):
                     fade_out = (cf_len - j) / cf_len
                     fade_in = j / cf_len
@@ -469,11 +476,6 @@ class PodcastGenerator:
         """
         if not wav_paths:
             raise ValueError("No WAV files to concatenate")
-
-        if len(wav_paths) == 1:
-            import shutil
-            shutil.copy2(wav_paths[0], output_path)
-            return output_path
 
         with wave.open(str(wav_paths[0]), "rb") as first:
             params = first.getparams()
