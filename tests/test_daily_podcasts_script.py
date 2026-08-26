@@ -183,6 +183,7 @@ CONTENT_DB="$STATE_DIR/content.sqlite"
 SECURITY_BIN="$3"
 CAPTURE="$4"
 DATE_CALLED="$5"
+PROJECT_DIR="$6"
 SHLOCK_BIN=/usr/bin/true
 date() {
     if [ -e "$DATE_CALLED" ]; then
@@ -212,6 +213,7 @@ main
             str(security),
             str(capture),
             str(date_called),
+            str(Path(__file__).resolve().parents[1]),
         ],
         check=True,
         env=os.environ | {"HOME": str(fake_home)},
