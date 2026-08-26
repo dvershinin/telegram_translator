@@ -10,6 +10,11 @@ SCRIPT = (
     Path(__file__).resolve().parents[1] / "scripts" / "daily_podcasts.sh"
 ).read_text(encoding="utf-8")
 CRON_ENTRY = Path(__file__).resolve().parents[1] / "scripts" / "daily_podcasts.cron"
+CRON_INSTALLER = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "install_daily_podcasts_cron.sh"
+)
 
 
 def test_scalable_stories_runs_before_russian_podcast() -> None:
@@ -319,3 +324,48 @@ def test_cron_is_night_only_and_cannot_truncate_active_log() -> None:
     assert entry.startswith("0 4 * * * ")
     assert ">>/tmp/daily_podcasts.log 2>&1" in entry
     assert " >/tmp/daily_podcasts.log" not in entry
+
+
+def test_cron_installer_replaces_only_podcast_entry(tmp_path: Path) -> None:
+    """The privileged installer preserves every unrelated cron entry."""
+    cron_store = tmp_path / "crontab"
+    cron_store.write_text(
+        "15 1 * * * /usr/local/bin/unrelated\n"
+        "0 4-23 * * * "
+        "/Users/danila/Projects/telegram_translator/"
+        "scripts/daily_podcasts.sh >/tmp/daily_podcasts.log 2>&1\n",
+        encoding="utf-8",
+    )
+    fake_crontab = tmp_path / "crontab-bin"
+    fake_crontab.write_text(
+        "#!/bin/bash\n"
+        "if [ \"$3\" = \"-l\" ]; then cat \"$CRON_STORE\"; "
+        "else cp \"$3\" \"$CRON_STORE\"; fi\n",
+        encoding="utf-8",
+    )
+    fake_crontab.chmod(0o755)
+    fake_sudo = tmp_path / "sudo-bin"
+    fake_sudo.write_text(
+        "#!/bin/bash\n"
+        "if [ \"$1\" = \"-v\" ]; then exit 0; fi\n"
+        "exec \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_sudo.chmod(0o755)
+
+    subprocess.run(
+        ["bash", str(CRON_INSTALLER)],
+        check=True,
+        env=os.environ
+        | {
+            "CRON_STORE": str(cron_store),
+            "CRONTAB_BIN": str(fake_crontab),
+            "SUDO_BIN": str(fake_sudo),
+            "TARGET_USER": "danila",
+        },
+    )
+
+    lines = cron_store.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "15 1 * * * /usr/local/bin/unrelated"
+    assert lines[1] == CRON_ENTRY.read_text(encoding="utf-8").strip()
+    assert len(lines) == 2
