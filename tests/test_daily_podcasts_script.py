@@ -32,7 +32,8 @@ def test_wordpress_credentials_are_scoped_to_scalable_stories() -> None:
 
 def test_scheduled_runner_is_safe_and_alerts_on_failure() -> None:
     """Failures stay visible while duplicate invocations cannot overlap."""
-    assert '/usr/bin/shlock -p "$$" -f "$LOCK_FILE"' in SCRIPT
+    assert 'SHLOCK_BIN="${SHLOCK_BIN:-/usr/bin/shlock}"' in SCRIPT
+    assert '"$SHLOCK_BIN" -p "$$" -f "$LOCK_FILE"' in SCRIPT
     assert '"$SUCCESS_FILE"' in SCRIPT
     assert "human_action_alert" in SCRIPT
     assert "telegram-translator-daily-podcasts-$run_date" in SCRIPT
@@ -182,6 +183,7 @@ CONTENT_DB="$STATE_DIR/content.sqlite"
 SECURITY_BIN="$3"
 CAPTURE="$4"
 DATE_CALLED="$5"
+SHLOCK_BIN=/usr/bin/true
 date() {
     if [ -e "$DATE_CALLED" ]; then
         printf '2026-08-26\n'

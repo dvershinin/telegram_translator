@@ -11,6 +11,7 @@ LOCK_FILE="$STATE_DIR/daily-podcasts.lock"
 KEYCHAIN_FILE="$HOME/Library/Keychains/login.keychain-db"
 CONTENT_DB="${CONTENT_DB:-$STATE_DIR/databases/content_store.db}"
 SECURITY_BIN="${SECURITY_BIN:-/usr/bin/security}"
+SHLOCK_BIN="${SHLOCK_BIN:-/usr/bin/shlock}"
 MCP_DEV="${MCP_DEV:-/Users/danila/.virtualenvs/mcps/bin/mcp-dev}"
 CLI="python3 -m telegram_translator.cli"
 VOICEBOX_URL="${VOICEBOX_URL:-http://localhost:17493}"
@@ -112,7 +113,7 @@ main() {
         echo "daily podcast pipeline already succeeded for $run_date"
         return 0
     fi
-    if ! /usr/bin/shlock -p "$$" -f "$LOCK_FILE"; then
+    if ! "$SHLOCK_BIN" -p "$$" -f "$LOCK_FILE"; then
         echo "daily podcast pipeline already running"
         return 0
     fi
