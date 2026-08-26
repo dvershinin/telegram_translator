@@ -362,6 +362,10 @@ def test_cron_installer_replaces_only_podcast_entry(tmp_path: Path) -> None:
             "CRONTAB_BIN": str(fake_crontab),
             "SUDO_BIN": str(fake_sudo),
             "TARGET_USER": "danila",
+            "RUNNER_PATH": (
+                "/Users/danila/Projects/telegram_translator/"
+                "scripts/daily_podcasts.sh"
+            ),
         },
     )
 

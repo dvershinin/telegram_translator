@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUNNER_PATH="$SCRIPT_DIR/daily_podcasts.sh"
+RUNNER_PATH="${RUNNER_PATH:-$SCRIPT_DIR/daily_podcasts.sh}"
 ENTRY_FILE="$SCRIPT_DIR/daily_podcasts.cron"
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-$(id -un)}}"
 SUDO_BIN="${SUDO_BIN:-/usr/bin/sudo}"
