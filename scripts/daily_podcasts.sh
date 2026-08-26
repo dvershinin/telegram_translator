@@ -1,7 +1,7 @@
 #!/bin/bash
 # Daily podcast pipeline: collect once, then run each podcast sequentially.
-# A single podcast's failure must not starve the others. The hourly cron retry
-# is bounded by a per-day success marker and this process lock.
+# A single podcast's failure must not starve the others. One logical episode
+# date is captured at startup and retained even when generation crosses midnight.
 set -o pipefail
 
 PROJECT_DIR="/Users/danila/Projects/telegram_translator"
@@ -26,48 +26,53 @@ record_failure() {
 }
 
 alert_failures() {
-    local today
-    today="$(date +%Y-%m-%d)"
+    local run_date="$1"
     if [ ! -x "$MCP_DEV" ]; then
         echo "podcast failure alert unavailable: $MCP_DEV is not executable" >&2
         return 1
     fi
     "$MCP_DEV" call system human_action_alert \
         --arg "title=Daily podcast pipeline failed" \
-        --arg "body=The scheduled podcast run failed for: $PIPELINE_FAILURES. Inspect /tmp/daily_podcasts.log. Cron will retry hourly through 23:00 until one full run succeeds." \
+        --arg "body=The scheduled podcast run for $run_date failed for: $PIPELINE_FAILURES. Inspect /tmp/daily_podcasts.log, then re-run that date after fixing the cause." \
         --arg "urgency=attention" \
-        --arg "dedupe_key=telegram-translator-daily-podcasts-$today" \
+        --arg "dedupe_key=telegram-translator-daily-podcasts-$run_date" \
         --arg "cooldown_seconds=82800" \
         --arg "working_directory=$PROJECT_DIR"
 }
 
 podcast_already_published() {
     local name="$1"
-    local today="$2"
+    local run_date="$2"
     python3 -c '
 import sqlite3
 import sys
+from pathlib import Path
 
-database, date, podcast = sys.argv[1:]
+database, date, podcast, project_dir = sys.argv[1:]
 try:
     row = sqlite3.connect(database).execute(
-        "SELECT status FROM digests WHERE date = ? AND podcast_name = ?",
+        "SELECT published_at, m4a_path FROM digests "
+        "WHERE date = ? AND podcast_name = ?",
         (date, podcast),
     ).fetchone()
 except sqlite3.Error:
     raise SystemExit(1)
-raise SystemExit(0 if row and row[0] == "published" else 1)
-' "$CONTENT_DB" "$today" "$name"
+if not row or not row[0] or not row[1]:
+    raise SystemExit(1)
+artifact = Path(row[1])
+if not artifact.is_absolute():
+    artifact = Path(project_dir) / artifact
+raise SystemExit(0 if artifact.is_file() else 1)
+' "$CONTENT_DB" "$run_date" "$name" "$PROJECT_DIR"
 }
 
 run_podcast() {
     local name="$1"
-    local today
+    local run_date="$2"
     local wordpress_credentials=0
-    today="$(date +%Y-%m-%d)"
 
-    if podcast_already_published "$name" "$today"; then
-        echo "podcast $name already published for $today; skipping"
+    if podcast_already_published "$name" "$run_date"; then
+        echo "podcast $name already published for $run_date; skipping"
         return 0
     fi
 
@@ -84,9 +89,9 @@ run_podcast() {
         wordpress_credentials=1
     fi
 
-    $CLI digest summarize --podcast "$name" \
-        && $CLI digest podcast --podcast "$name" \
-        && $CLI digest publish --podcast "$name"
+    $CLI digest summarize --date "$run_date" --podcast "$name" \
+        && $CLI digest podcast --date "$run_date" --podcast "$name" \
+        && $CLI digest publish --date "$run_date" --podcast "$name"
     local rc=$?
     if [ "$rc" -ne 0 ]; then
         echo "podcast $name failed (exit $rc); continuing with remaining podcasts"
@@ -99,12 +104,12 @@ run_podcast() {
 }
 
 main() {
-    local today
-    today="$(date +%Y-%m-%d)"
+    local run_date
+    run_date="$(date +%Y-%m-%d)"
     mkdir -p "$STATE_DIR"
 
-    if [ "$(cat "$SUCCESS_FILE" 2>/dev/null)" = "$today" ]; then
-        echo "daily podcast pipeline already succeeded for $today"
+    if [ "$(cat "$SUCCESS_FILE" 2>/dev/null)" = "$run_date" ]; then
+        echo "daily podcast pipeline already succeeded for $run_date"
         return 0
     fi
     if ! /usr/bin/shlock -p "$$" -f "$LOCK_FILE"; then
@@ -117,19 +122,19 @@ main() {
     # shellcheck source=/dev/null
     if ! source "$HOME/.secrets"; then
         record_failure "environment setup"
-        alert_failures || true
+        alert_failures "$run_date" || true
         return 1
     fi
     if ! cd "$PROJECT_DIR"; then
         record_failure "project directory"
-        alert_failures || true
+        alert_failures "$run_date" || true
         return 1
     fi
 
     # Collect sources once for the shared daily run.
-    if ! $CLI digest collect; then
+    if ! $CLI digest collect --date "$run_date"; then
         record_failure "collection"
-        alert_failures || true
+        alert_failures "$run_date" || true
         return 1
     fi
 
@@ -142,19 +147,19 @@ main() {
         echo "voicebox pre-warm failed against $VOICEBOX_URL; pipeline will retry per podcast"
     fi
 
-    run_podcast crosswire
-    run_podcast the_stack
-    run_podcast scalable_stories
-    run_podcast vaske_daily
+    run_podcast crosswire "$run_date"
+    run_podcast the_stack "$run_date"
+    run_podcast scalable_stories "$run_date"
+    run_podcast vaske_daily "$run_date"
 
     if [ -n "$PIPELINE_FAILURES" ]; then
-        alert_failures || true
+        alert_failures "$run_date" || true
         return 1
     fi
 
-    printf '%s\n' "$today" > "$SUCCESS_FILE.$$"
+    printf '%s\n' "$run_date" > "$SUCCESS_FILE.$$"
     mv "$SUCCESS_FILE.$$" "$SUCCESS_FILE"
-    echo "daily podcast pipeline succeeded for $today"
+    echo "daily podcast pipeline succeeded for $run_date"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

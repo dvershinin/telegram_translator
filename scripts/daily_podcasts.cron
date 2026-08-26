@@ -1,0 +1,1 @@
+0 4 * * * /Users/danila/Projects/telegram_translator/scripts/daily_podcasts.sh >>/tmp/daily_podcasts.log 2>&1
