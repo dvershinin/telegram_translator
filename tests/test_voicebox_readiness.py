@@ -93,6 +93,28 @@ def _patch_sleep(monkeypatch):
     return sleeps
 
 
+class _GenerationClient:
+    """Capture one generation payload and return a small WAV placeholder."""
+
+    def __init__(self):
+        self.payload = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, json):
+        self.payload = json
+        return _ok_response({"id": "generation-1", "duration": 1.0})
+
+    async def get(self, url):
+        response = _ok_response(None)
+        response.content = b"RIFF-placeholder"
+        return response
+
+
 @pytest.mark.asyncio
 async def test_fetch_profiles_succeeds_on_first_try(monkeypatch, tmp_path):
     """No retry, no sleep when the very first GET returns 200."""
@@ -176,3 +198,45 @@ async def test_get_profile_id_uses_retry_path(monkeypatch, tmp_path):
     profile_id_again = await gen._get_profile_id()
     assert profile_id_again == "uuid-2"
     assert fake.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_segment_forwards_voice_instruction(monkeypatch, tmp_path):
+    """The selected delivery direction must reach Voicebox unchanged."""
+    instruction = "Speak naturally with restrained emotion."
+    generator = PodcastGenerator(
+        {
+            "name": "test",
+            "voicebox_url": "http://localhost:17493",
+            "voice_profile": "profile-id",
+            "voice_instruct": instruction,
+            "output_dir": str(tmp_path),
+        }
+    )
+    generator._profile_id = "profile-id"
+    client = _GenerationClient()
+    monkeypatch.setattr(
+        podcast_generator.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    await generator.generate_segment("Hello.", tmp_path / "segment.wav")
+
+    assert client.payload["instruct"] == instruction
+
+
+def test_voice_instruction_participates_in_tts_cache_key(tmp_path):
+    """Changing delivery direction must not reuse a stale TTS segment."""
+    base = {
+        "name": "test",
+        "voice_profile": "profile-id",
+        "output_dir": str(tmp_path),
+    }
+    plain = PodcastGenerator(base, tts_cache_dir=tmp_path / "cache")
+    directed = PodcastGenerator(
+        {**base, "voice_instruct": "Speak naturally."},
+        tts_cache_dir=tmp_path / "cache",
+    )
+
+    assert plain._tts_cache_path("Hello.") != directed._tts_cache_path("Hello.")

@@ -1,0 +1,60 @@
+{
+  "provenance": {
+    "method": "Alibaba Cloud Model Studio Qwen Voice Design",
+    "model": "qwen3-tts-vd-2026-01-26",
+    "created": "2026-08-28",
+    "note": "Each candidate is an original synthetic voice created from a text description, not a clone of a real person."
+  },
+  "candidates": {
+    "mara": {
+      "host_direction": "The systems editor",
+      "voice_id": "qwen-tts-vd-scalable_mara-voice-20260828221423015-ae5a",
+      "voicebox_profile_id": "680ce7c3-0775-4c44-8df2-1d8893f42605"
+    },
+    "tess": {
+      "host_direction": "The incident commander",
+      "voice_id": "qwen-tts-vd-scalable_tess-voice-20260828221423019-be0a",
+      "voicebox_profile_id": "672e75ca-ea63-4978-b718-42744e426c64"
+    },
+    "nora": {
+      "host_direction": "The staff engineer",
+      "voice_id": "qwen-tts-vd-scalable_nora-voice-20260828221423018-1388",
+      "voicebox_profile_id": "848c8c6e-a1cd-49a9-b1b5-5472e36e904b"
+    }
+  },
+  "human_candidate": {
+    "name": "Danila",
+    "host_direction": "The operator-editor",
+    "voicebox_profile_id": "63eb43f2-ffb6-418f-85be-e534b4d60358",
+    "consent": "Danila Vershinin recorded and explicitly offered his own voice for this Scalable Stories audition.",
+    "selected": true,
+    "reference_count": 3,
+    "reference_duration_seconds": 83.69,
+    "reference_version": 1,
+    "reference_directory": "/Users/danila/Documents/Voice References/Scalable Stories/Danila"
+  },
+  "human_reference_passages_v2": [
+    "This is Scalable Stories. We test the claim before we trust the config. The interesting part is not that a benchmark moved. The interesting part is why it moved, when it stops mattering, and which production assumption breaks first.",
+    "Here is the result that matters. With four hundred milliseconds of origin delay, Early Hints cut Largest Contentful Paint by one hundred eighty-four milliseconds. With no delay, the benefit disappeared. Not smaller. Gone. The feature did not create speed. It only reclaimed time the origin had already wasted.",
+    "Now the production gate. Engine X can pass an HTTP one-oh-three response from a proxy or gRPC upstream, but FastCGI cannot forward it. So do not start with the directive.",
+    "Start with the upstream. Verify the interim response, then measure the real page. Measure the wait. Reclaim only what is real."
+  ],
+  "passages": [
+    {
+      "slug": "editorial",
+      "text": "This is Scalable Stories. We test the claim before we trust the config. A useful infrastructure story does more than repeat the documentation. It tells you what changed, which assumption fails in production, and the exact measurement that should decide whether the feature belongs in your stack."
+    },
+    {
+      "slug": "benchmark",
+      "text": "In sixty interleaved cold-cache runs, with four hundred milliseconds of origin think-time, Largest Contentful Paint fell from seven hundred forty-eight to five hundred sixty-four milliseconds. With a zero-delay origin, the gain was exactly zero. That is the honest result: Early Hints can reclaim waiting time, but it cannot create time your origin never wasted."
+    },
+    {
+      "slug": "mechanism",
+      "text": "Engine X does not generate Early Hints. It passes through a Hypertext Transfer Protocol 103 response that the upstream already produced. Proxy and gRPC upstreams can forward that interim response; FastCGI cannot. If the application sends no 103, the directive changes nothing. That narrow mechanism is the first production gate."
+    },
+    {
+      "slug": "judgment",
+      "text": "Time to First Byte can mislead you because response start moves when the hint arrives, even if the HTML does not arrive sooner. Request for Comments 8297, the Enterprise Linux gate, Advanced Package Tool instructions, version one point twenty-nine point zero, and every exact command belong in the companion article. Measure the wait. Reclaim only what is real."
+    }
+  ]
+}

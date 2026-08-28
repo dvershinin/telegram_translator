@@ -7,12 +7,15 @@ import logging
 import re
 import shutil
 import struct
+import tempfile
 import time
 import wave
 from pathlib import Path
 from typing import Optional
 
 import httpx
+
+from .audio_encoder import normalize_wav
 
 logger = logging.getLogger(__name__)
 
@@ -298,8 +301,9 @@ class PodcastGenerator:
 
         Args:
             config: Resolved podcast config dict with keys: voicebox_url,
-                voice_profile, language, output_dir, pause_between_segments_ms,
-                audio (dict with asset paths and mixing params), name.
+                voice_profile, optional voice_instruct, language, output_dir,
+                pause_between_segments_ms, audio (dict with asset paths and
+                mixing params), name.
             tts_cache_dir: Directory for TTS segment cache files.
             no_cache: If True, bypass TTS cache entirely.
         """
@@ -309,6 +313,14 @@ class PodcastGenerator:
             "voicebox_url", "http://localhost:17493"
         )
         self.voice_profile_name = config.get("voice_profile", "default")
+        voice_instruct = config.get("voice_instruct")
+        if voice_instruct is not None:
+            if not isinstance(voice_instruct, str) or not voice_instruct.strip():
+                raise ValueError("voice_instruct must be a non-empty string")
+            if len(voice_instruct) > 500:
+                raise ValueError("voice_instruct must be at most 500 characters")
+            voice_instruct = voice_instruct.strip()
+        self.voice_instruct = voice_instruct
         self.language = config.get("language", "en")
         self.output_dir = Path(config.get("output_dir", "./podcasts"))
         self.pause_ms = config.get("pause_between_segments_ms", 800)
@@ -335,6 +347,21 @@ class PodcastGenerator:
         self.background_fade_seconds = float(
             audio.get("background_fade_seconds", 3.0)
         )
+        self.background_bed_start_after_intro = bool(
+            audio.get("background_bed_start_after_intro", False)
+        )
+        voice_target = audio.get("voice_target_lufs")
+        try:
+            self.voice_target_lufs = (
+                None if voice_target is None else float(voice_target)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("voice_target_lufs must be a number") from exc
+        if (
+            self.voice_target_lufs is not None
+            and not -36.0 <= self.voice_target_lufs <= -9.0
+        ):
+            raise ValueError("voice_target_lufs must be between -36 and -9")
 
         self._profile_id: Optional[str] = None
 
@@ -396,18 +423,23 @@ class PodcastGenerator:
         return bed_raw
 
     def _load_background_bed(
-        self, target_samples: int, sample_rate: int
+        self,
+        target_samples: int,
+        sample_rate: int,
+        start_sample: int = 0,
     ) -> list[int]:
         """Load and loop the background music bed.
 
         Args:
             target_samples: Total podcast length in samples.
             sample_rate: Target sample rate.
+            start_sample: Sample offset before the bed begins.
 
         Returns:
             List of 16-bit sample values, same length as the podcast.
         """
-        if not self.background_bed_path.exists():
+        content_samples = max(0, target_samples - start_sample)
+        if not self.background_bed_path.exists() or content_samples == 0:
             return [0] * target_samples
 
         clip = _load_audio_asset(
@@ -420,7 +452,7 @@ class PodcastGenerator:
         crossfade_samples = int(sample_rate * 2.0)
         looped: list[int] = []
 
-        while len(looped) < target_samples:
+        while len(looped) < content_samples:
             if looped and crossfade_samples > 0:
                 # Always leave at least one new sample to append. Without
                 # this bound, a clip no longer than the crossfade window
@@ -441,7 +473,7 @@ class PodcastGenerator:
             else:
                 looped.extend(clip)
 
-        looped = looped[:target_samples]
+        looped = looped[:content_samples]
 
         # Volume and fade-in/out
         fade_samples = int(sample_rate * self.background_fade_seconds)
@@ -453,7 +485,7 @@ class PodcastGenerator:
                 fade = (len(looped) - i) / fade_samples
             looped[i] = int(looped[i] * self.background_bed_volume * fade)
 
-        return looped
+        return [0] * start_sample + looped
 
     # -- Assembly --
 
@@ -477,13 +509,49 @@ class PodcastGenerator:
         if not wav_paths:
             raise ValueError("No WAV files to concatenate")
 
+        if self.voice_target_lufs is not None:
+            with tempfile.TemporaryDirectory(
+                prefix="podcast-voice-normalized-"
+            ) as temp_dir:
+                normalized_paths = []
+                for index, wav_path in enumerate(wav_paths):
+                    normalized_path = Path(temp_dir) / (
+                        f"{index:03d}-{wav_path.name}"
+                    )
+                    normalize_wav(
+                        wav_path,
+                        normalized_path,
+                        self.voice_target_lufs,
+                    )
+                    normalized_paths.append(normalized_path)
+                return self._assemble_podcast_frames(
+                    normalized_paths,
+                    output_path,
+                    topic_boundaries,
+                )
+
+        return self._assemble_podcast_frames(
+            wav_paths,
+            output_path,
+            topic_boundaries,
+        )
+
+    def _assemble_podcast_frames(
+        self,
+        wav_paths: list[Path],
+        output_path: Path,
+        topic_boundaries: set[int] | None,
+    ) -> Path:
+        """Assemble already-normalized narration with transitions and beds."""
+
         with wave.open(str(wav_paths[0]), "rb") as first:
             params = first.getparams()
             sample_rate = first.getframerate()
+            first_segment_samples = first.getnframes()
 
         transition_frames = self._load_whoosh_frames(sample_rate)
 
-        brief_silence_samples = int(sample_rate * 150 / 1000)
+        brief_silence_samples = int(sample_rate * self.pause_ms / 1000)
         brief_silence = b"\x00\x00" * brief_silence_samples * params.nchannels
 
         # Assemble voice frames
@@ -496,7 +564,12 @@ class PodcastGenerator:
                 continue
 
             next_idx = i + 1
-            if topic_boundaries is None or next_idx in topic_boundaries:
+            is_signature_pause = (
+                self.background_bed_start_after_intro and next_idx == 1
+            )
+            if is_signature_pause:
+                voice_frames.extend(brief_silence)
+            elif topic_boundaries is None or next_idx in topic_boundaries:
                 voice_frames.extend(transition_frames)
             else:
                 voice_frames.extend(brief_silence)
@@ -511,7 +584,19 @@ class PodcastGenerator:
             params.sampwidth * params.nchannels
         )
         intro_bed = self._load_intro_bed(total_samples, sample_rate)
-        bg_bed = self._load_background_bed(total_samples, sample_rate)
+        background_start_sample = 0
+        if self.background_bed_start_after_intro:
+            background_start_sample = min(
+                total_samples,
+                lead_in_samples
+                + first_segment_samples
+                + brief_silence_samples,
+            )
+        bg_bed = self._load_background_bed(
+            total_samples,
+            sample_rate,
+            start_sample=background_start_sample,
+        )
 
         voice_ints = struct.unpack(
             f"<{total_samples}h", bytes(voice_frames)
@@ -627,6 +712,8 @@ class PodcastGenerator:
         if not self.tts_cache_dir:
             return None
         payload = f"{text}:{self.voice_profile_name}"
+        if self.voice_instruct:
+            payload += f":instruct:{self.voice_instruct}"
         h = hashlib.sha256(payload.encode()).hexdigest()
         return self.tts_cache_dir / f"{h}.wav"
 
@@ -664,6 +751,8 @@ class PodcastGenerator:
             "profile_id": profile_id,
             "language": self.language,
         }
+        if self.voice_instruct:
+            payload["instruct"] = self.voice_instruct
 
         try:
             async with httpx.AsyncClient(timeout=900) as client:

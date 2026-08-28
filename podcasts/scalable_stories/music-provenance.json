@@ -1,0 +1,38 @@
+{
+  "selected_at": "2026-08-29",
+  "generation": {
+    "provider": "Suno",
+    "plan": "Pro Plan",
+    "model": "v5",
+    "job_id": "2942eece-ab04-4341-97d6-e32897831e8a",
+    "title": "Scalable Stories Editorial",
+    "instrumental": true,
+    "style": "Instrumental serious investigative journalism podcast theme, refined editorial current-affairs identity, 92 BPM, organic brushed percussion, muted piano ostinato, warm restrained bass, subtle plucked strings and marimba accents, memorable three-note mnemonic, concise resolved opening ident, then a steady understated documentary underscore, intelligent, credible, curious, premium broadcast mix",
+    "exclude": "vocals, singing, speech, lyrics, techno, disco, EDM, dance beat, four-on-the-floor kick, synth arpeggio, sci-fi interface sounds, cyberpunk, corporate inspiration, cinematic trailer, brass fanfare, bells, ambient wash, long buildup"
+  },
+  "intro": {
+    "selection": "Editorial Intro A",
+    "clip_id": "906ba1db-98e4-4987-904f-e6ee0f1d6824",
+    "source_seconds": [0, 10],
+    "master": "assets/editorial-intro.wav",
+    "sha256": "c05aaa2dd1b2ce2e90c42dfa68b7ae4e83a13016ff3fdb3231c54e2668fdf15d",
+    "master_lufs": -18,
+    "mix_volume": 0.55
+  },
+  "narration_bed": {
+    "selection": "Editorial Bed 3",
+    "clip_id": "7eff8f01-2256-4d0a-a384-9313b6415e28",
+    "source_seconds": [15, 55],
+    "master": "assets/editorial-bed.wav",
+    "sha256": "edf609133701c23eb69aee8148bb07388e36e716a95d4de153e4102d242d71b7",
+    "master_lufs": -18,
+    "mix_volume": 0.24
+  },
+  "timing": {
+    "lead_in_seconds": 4.0,
+    "signature_pause_ms": 1200,
+    "intro_fade_seconds": 1.2,
+    "background_bed_start_after_intro": true
+  },
+  "rights_note": "Generated and downloaded while the account reported an active Suno Pro Plan. Retain the source clip IDs and account invoice/history with this manifest. Commercial use remains subject to Suno's terms."
+}

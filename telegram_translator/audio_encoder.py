@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import subprocess
+import wave
 from pathlib import Path
 
 from pydub import AudioSegment
@@ -74,6 +75,55 @@ def _measured_loudnorm_filter(
         f"loudnorm=I={target}:TP=-2:LRA=11:{measurements}:"
         "linear=true:print_format=summary"
     )
+
+
+def normalize_wav(
+    wav_path: Path,
+    output_path: Path,
+    target_lufs: float,
+) -> Path:
+    """Normalize a WAV file to a measured EBU R128 loudness target.
+
+    Args:
+        wav_path: Source WAV file.
+        output_path: Destination WAV file.
+        target_lufs: Desired integrated loudness in LUFS.
+
+    Returns:
+        The destination path.
+
+    Raises:
+        RuntimeError: If ffmpeg analysis or normalization fails.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(wav_path), "rb") as source:
+        sample_rate = source.getframerate()
+    loudnorm_filter = _measured_loudnorm_filter(wav_path, target_lufs)
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(wav_path),
+                "-af",
+                loudnorm_filter,
+                "-c:a",
+                "pcm_s16le",
+                "-ar",
+                str(sample_rate),
+                str(output_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("ffmpeg WAV loudness normalization failed") from exc
+    return output_path
 
 
 def encode_m4a(

@@ -157,6 +157,9 @@ podcasts:
     sources: [naebnet, lenta, cnn]          # references global source names
     selection_prompt: "Select articles about geopolitics, military, and economics"
     voice_profile: "angiebunny27"
+    # Optional delivery direction forwarded to Voicebox. It participates in
+    # the segment cache key, so changing it regenerates affected narration.
+    voice_instruct: "Speak naturally, with conversational pacing."
     language: "en"
     llm_role: writer                       # model/provider/key from the env
     # Model IDs are NEVER written here. `llm_role` selects one of the roles
@@ -194,7 +197,15 @@ podcasts:
       intro_bed_volume: 0.7
       background_bed_volume: 0.08
       background_fade_seconds: 3.0
+      # Delay the continuous underscore until the first narration segment and
+      # its configured pause finish. Useful for a foreground signature intro.
+      background_bed_start_after_intro: false
+      # Optional pre-mix narration normalization. Keeps the voice-to-bed
+      # relationship stable when Voicebox profiles have different source gain.
+      voice_target_lufs: -19
     output_dir: "./podcasts/daily_briefing"
+    # Silence inserted between adjacent narration segments that do not have a
+    # topic transition. Topic boundaries use the whoosh transition instead.
     pause_between_segments_ms: 800
     publish:
       # Per-podcast (show-level) metadata only — base_url, publish_dir,

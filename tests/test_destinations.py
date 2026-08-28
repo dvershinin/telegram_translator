@@ -275,6 +275,38 @@ class TestResolveDestinations:
 class TestPodcastResolutionWithDestination:
     """Podcasts that reference a destination inherit derived publish keys."""
 
+    def test_resolves_voice_delivery_and_normalization(self, tmp_path):
+        mgr = _make_mgr(
+            {
+                "podcasts": {
+                    "scalable_stories": {
+                        "voice_profile": "profile-uuid",
+                        "voice_instruct": "Speak naturally.",
+                        "audio": {
+                            "voice_target_lufs": -19,
+                            "background_bed_start_after_intro": True,
+                        },
+                    }
+                }
+            },
+            tmp_path,
+        )
+
+        resolved = mgr.resolve_podcast_configs()["scalable_stories"]
+
+        assert resolved["voice_instruct"] == "Speak naturally."
+        assert resolved["audio"]["voice_target_lufs"] == -19.0
+        assert resolved["audio"]["background_bed_start_after_intro"] is True
+
+    def test_voice_delivery_options_default_to_disabled(self, tmp_path):
+        mgr = _make_mgr({"podcasts": {"plain": {}}}, tmp_path)
+
+        resolved = mgr.resolve_podcast_configs()["plain"]
+
+        assert resolved["voice_instruct"] is None
+        assert resolved["audio"]["voice_target_lufs"] is None
+        assert resolved["audio"]["background_bed_start_after_intro"] is False
+
     def test_static_subpath_default_slug(self, tmp_path):
         mgr = _make_mgr(
             {

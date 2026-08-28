@@ -450,6 +450,7 @@ class ConfigManager:
             "source_names": list(source_refs),
             "selection_prompt": cfg.get("selection_prompt", ""),
             "voice_profile": cfg.get("voice_profile", "default"),
+            "voice_instruct": cfg.get("voice_instruct"),
             "language": cfg.get("language", "en"),
             # Model/provider are NOT configured here. A podcast names an LLM
             # role; the role's model, base URL, and key resolve from the
@@ -490,6 +491,14 @@ class ConfigManager:
                 ),
                 "background_fade_seconds": float(
                     audio_cfg.get("background_fade_seconds", 3.0)
+                ),
+                "background_bed_start_after_intro": bool(
+                    audio_cfg.get("background_bed_start_after_intro", False)
+                ),
+                "voice_target_lufs": (
+                    None
+                    if audio_cfg.get("voice_target_lufs") is None
+                    else float(audio_cfg["voice_target_lufs"])
                 ),
             },
             "output_dir": cfg.get("output_dir", f"./podcasts/{name}"),
