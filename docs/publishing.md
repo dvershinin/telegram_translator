@@ -155,6 +155,61 @@ the durable ledger.
 `digest feed` intentionally skips WordPress podcasts because WordPress owns
 their feed.
 
+### Unattended Scalable Stories credentials
+
+The daily runner reads the existing dedicated WordPress application password
+from `~/Library/Application Support/telegram_translator/credentials/scalable-stories-wordpress-password`.
+The directory must be owned by the runner user with mode `0700`; the password
+must be a single, nonempty line in a regular file owned by that user with mode
+`0600`. Symlinked directories/files and hard-linked files are rejected. The
+file contains password data, never shell code, and lives outside the repository.
+It is a plaintext credential restricted by filesystem permissions; do not put
+the account login password or any other credentials there.
+
+Provision once from an interactive session that can read the existing Keychain
+item. Repeat after rotating that dedicated application password and updating
+the Keychain item. This command keeps the old file if retrieval fails and does
+not print the password:
+
+```bash
+(
+    set -e
+    umask 077
+    credential_dir="$HOME/Library/Application Support/telegram_translator/credentials"
+    mkdir -p "$credential_dir"
+    chmod 700 "$credential_dir"
+    credential_tmp="$(mktemp "$credential_dir/.wordpress-password.XXXXXX")"
+    trap 'rm -f "$credential_tmp"' EXIT
+    /usr/bin/security find-generic-password -a danila \
+        -s getpagespeed-scalable-stories-wordpress -w \
+        "$HOME/Library/Keychains/login.keychain-db" > "$credential_tmp"
+    test -s "$credential_tmp"
+    chmod 600 "$credential_tmp"
+    mv "$credential_tmp" "$credential_dir/scalable-stories-wordpress-password"
+)
+```
+
+At runtime no Keychain/UI access occurs. The runner exports `GPS_WP_USER=danila`
+and `GPS_WP_APP_PASSWORD` only for Scalable Stories, then clears both on success
+or failure. Missing or unsafe credentials skip that show, allow the remaining
+shows to run, and prevent the full-run success marker from advancing. There is
+no fallback to a login password, ambient environment value, or Keychain.
+
+Verify credential loading without printing it or generating audio:
+
+```bash
+/usr/bin/env -i HOME="$HOME" \
+    PATH="/Library/Frameworks/Python.framework/Versions/3.12/bin:/usr/bin:/bin" \
+    /bin/bash --noprofile --norc -c \
+    'source /Users/danila/Projects/telegram_translator/scripts/daily_podcasts.sh; read_wordpress_password >/dev/null'
+```
+
+End-to-end verification belongs to the next scheduled 04:00 run. Confirm the
+dated durable log records Scalable Stories publication, its digest has
+`published_at` plus a local M4A, the WordPress episode/feed is live, and
+`daily-podcasts-success-date` advances after all shows succeed. Do not rerun
+audio generation during the day or backfill the cancelled 2026-08-26 episode.
+
 Set `loudness_target_lufs: -19` for mono spoken-word delivery. The M4A encoder
 uses measured two-pass EBU R128 normalization with a -2 dB pre-encode
 true-peak target while leaving the generated source WAV untouched.

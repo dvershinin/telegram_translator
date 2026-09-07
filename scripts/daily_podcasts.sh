@@ -8,9 +8,8 @@ PROJECT_DIR="/Users/danila/Projects/telegram_translator"
 STATE_DIR="$HOME/Library/Application Support/telegram_translator"
 SUCCESS_FILE="$STATE_DIR/daily-podcasts-success-date"
 LOCK_FILE="$STATE_DIR/daily-podcasts.lock"
-KEYCHAIN_FILE="$HOME/Library/Keychains/login.keychain-db"
+WORDPRESS_PASSWORD_FILE="$STATE_DIR/credentials/scalable-stories-wordpress-password"
 CONTENT_DB="${CONTENT_DB:-$STATE_DIR/databases/content_store.db}"
-SECURITY_BIN="${SECURITY_BIN:-/usr/bin/security}"
 SHLOCK_BIN="${SHLOCK_BIN:-/usr/bin/shlock}"
 MCP_DEV="${MCP_DEV:-/Users/danila/.virtualenvs/mcps/bin/mcp-dev}"
 CLI="python3 -m telegram_translator.cli"
@@ -80,10 +79,46 @@ raise SystemExit(0 if artifact.is_file() else 1)
 ' "$CONTENT_DB" "$run_date" "$name" "$PROJECT_DIR"
 }
 
+read_wordpress_password() {
+    # Read data, never source shell code. Fail closed before emitting any secret.
+    python3 - "$WORDPRESS_PASSWORD_FILE" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+
+try:
+    path = Path(sys.argv[1])
+    directory = path.parent.lstat()
+    if (not stat.S_ISDIR(directory.st_mode)
+            or directory.st_uid != os.getuid()
+            or stat.S_IMODE(directory.st_mode) != 0o700):
+        raise ValueError("unsafe credential directory")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as credential:
+        metadata = os.fstat(credential.fileno())
+        if (not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_nlink != 1):
+            raise ValueError("unsafe credential file")
+        raw = credential.read(4097)
+    password = raw.decode("utf-8").removesuffix("\n")
+    if (len(raw) > 4096 or not password.strip()
+            or any(char in password for char in ("\n", "\r", "\0"))):
+        raise ValueError("invalid credential contents")
+except (OSError, ValueError):
+    print("WordPress credential file unavailable or unsafe", file=sys.stderr)
+    raise SystemExit(1)
+sys.stdout.write(password)
+PY
+}
+
 run_podcast() {
     local name="$1"
     local run_date="$2"
     local wordpress_credentials=0
+    unset GPS_WP_USER GPS_WP_APP_PASSWORD
 
     if podcast_already_published "$name" "$run_date"; then
         echo "podcast $name already published for $run_date; skipping"
@@ -91,11 +126,10 @@ run_podcast() {
     fi
 
     if [ "$name" = "scalable_stories" ]; then
-        if ! GPS_WP_APP_PASSWORD="$("$SECURITY_BIN" find-generic-password \
-                -a danila -s getpagespeed-scalable-stories-wordpress -w \
-                "$KEYCHAIN_FILE")"; then
-            echo "podcast $name failed: WordPress credential unavailable in Keychain"
-            record_failure "$name (Keychain unavailable)"
+        if ! GPS_WP_APP_PASSWORD="$(read_wordpress_password)"; then
+            unset GPS_WP_USER GPS_WP_APP_PASSWORD
+            echo "podcast $name failed: WordPress credential file unavailable or unsafe"
+            record_failure "$name (credential unavailable)"
             return 0
         fi
         export GPS_WP_USER=danila

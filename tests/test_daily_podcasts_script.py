@@ -5,15 +5,14 @@ from pathlib import Path
 import sqlite3
 import subprocess
 
+import pytest
 
 SCRIPT = (
     Path(__file__).resolve().parents[1] / "scripts" / "daily_podcasts.sh"
 ).read_text(encoding="utf-8")
 CRON_ENTRY = Path(__file__).resolve().parents[1] / "scripts" / "daily_podcasts.cron"
 CRON_INSTALLER = (
-    Path(__file__).resolve().parents[1]
-    / "scripts"
-    / "install_daily_podcasts_cron.sh"
+    Path(__file__).resolve().parents[1] / "scripts" / "install_daily_podcasts_cron.sh"
 )
 
 
@@ -25,11 +24,10 @@ def test_scalable_stories_runs_before_russian_podcast() -> None:
 
 
 def test_wordpress_credentials_are_scoped_to_scalable_stories() -> None:
-    """Cron retrieves the app password from Keychain and removes it afterward."""
+    """Load only the show's password without requiring the login Keychain."""
     assert 'if [ "$name" = "scalable_stories" ]' in SCRIPT
-    assert '"$SECURITY_BIN" find-generic-password' in SCRIPT
-    assert "-s getpagespeed-scalable-stories-wordpress -w" in SCRIPT
-    assert '"$KEYCHAIN_FILE"' in SCRIPT
+    assert "find-generic-password" not in SCRIPT
+    assert '"$WORDPRESS_PASSWORD_FILE"' in SCRIPT
     assert "export GPS_WP_USER=danila" in SCRIPT
     assert "export GPS_WP_APP_PASSWORD" in SCRIPT
     assert "unset GPS_WP_USER GPS_WP_APP_PASSWORD" in SCRIPT
@@ -49,39 +47,131 @@ def test_scheduled_runner_is_safe_and_alerts_on_failure() -> None:
     assert 'podcast_already_published "$name" "$run_date"' in SCRIPT
 
 
-def test_keychain_failure_is_recorded_and_uses_explicit_file(tmp_path: Path) -> None:
-    """A cron-context Keychain miss remains retryable and names the exact file."""
-    capture = tmp_path / "security-args"
-    security = tmp_path / "security"
-    security.write_text(
-        '#!/bin/bash\nprintf "%s\\n" "$@" > "$CAPTURE"\nexit 1\n',
-        encoding="utf-8",
-    )
-    security.chmod(0o755)
-    env = os.environ | {"CAPTURE": str(capture)}
+@pytest.mark.parametrize("stage_failure", [False, True])
+def test_private_password_works_without_login_context(
+    tmp_path: Path, stage_failure: bool
+) -> None:
+    """Load from a private file and clear secrets even when a stage fails."""
+    credential_dir = tmp_path / "credentials"
+    credential_dir.mkdir(mode=0o700)
+    password_file = credential_dir / "scalable-stories-wordpress-password"
+    password_file.write_text("test application password\n", encoding="utf-8")
+    password_file.chmod(0o600)
+    shell = r"""
+source "$1"
+WORDPRESS_PASSWORD_FILE="$2"
+podcast_already_published() { return 1; }
+mock_cli() {
+    if [ "${GPS_WP_USER:-}" != danila ] ||
+       [ "${GPS_WP_APP_PASSWORD:-}" != 'test application password' ]; then
+        echo wrong-credentials
+        return 90
+    fi
+    echo "stage $2"
+    [ "$3" = --date ] || return 91
+    [ "$STAGE_FAILURE" = false ]
+}
+CLI=mock_cli
+run_podcast scalable_stories 2026-09-08
+[ "${GPS_WP_USER+x}${GPS_WP_APP_PASSWORD+x}" = '' ] || exit 92
+printf 'failures:%s\n' "$PIPELINE_FAILURES"
+mock_cli() {
+    [ "${GPS_WP_USER+x}${GPS_WP_APP_PASSWORD+x}" = '' ] || exit 93
+}
+run_podcast vaske_daily 2026-09-08
+"""
     result = subprocess.run(
         [
             "bash",
+            "--noprofile",
+            "--norc",
             "-c",
-            'source "$1"; SECURITY_BIN="$2"; KEYCHAIN_FILE="$3"; '
-            'CONTENT_DB="$4"; '
-            'run_podcast scalable_stories 2026-08-25; '
-            'printf "%s" "$PIPELINE_FAILURES"',
+            shell,
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
-            str(security),
-            "/tmp/login.keychain-db",
-            str(tmp_path / "missing-content.sqlite"),
+            str(password_file),
         ],
         check=True,
         capture_output=True,
         text=True,
-        env=env,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "STAGE_FAILURE": str(stage_failure).lower(),
+        },
     )
-    assert "scalable_stories (Keychain unavailable)" in result.stdout
-    assert capture.read_text(encoding="utf-8").splitlines()[-1] == (
-        "/tmp/login.keychain-db"
+    assert "wrong-credentials" not in result.stdout
+    assert "test application password" not in result.stdout + result.stderr
+    assert "stage summarize" in result.stdout
+    assert ("stage publish" in result.stdout) is not stage_failure
+    assert ("scalable_stories (exit 1)" in result.stdout) is stage_failure
+
+
+@pytest.mark.parametrize(
+    "bad_file",
+    [
+        "missing",
+        "empty",
+        "public",
+        "symlink",
+        "public_dir",
+        "multiline",
+        "trailing_blank",
+    ],
+)
+def test_unsafe_password_is_rejected_without_running_stages(
+    tmp_path: Path, bad_file: str
+) -> None:
+    """Reject unavailable or unsafe files and discard inherited credentials."""
+    credential_dir = tmp_path / "credentials"
+    credential_dir.mkdir(mode=0o700)
+    password_file = credential_dir / "scalable-stories-wordpress-password"
+    password_file.write_text("test-secret\n", encoding="utf-8")
+    password_file.chmod(0o600)
+    if bad_file == "missing":
+        password_file.unlink()
+    elif bad_file == "empty":
+        password_file.write_text("\n", encoding="utf-8")
+    elif bad_file == "public":
+        password_file.chmod(0o644)
+    elif bad_file == "symlink":
+        target = credential_dir / "target"
+        password_file.rename(target)
+        password_file.symlink_to(target)
+    elif bad_file == "public_dir":
+        credential_dir.chmod(0o755)
+    elif bad_file == "multiline":
+        password_file.write_text("test-secret\nextra-line\n", encoding="utf-8")
+    elif bad_file == "trailing_blank":
+        password_file.write_text("test-secret\n\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; WORDPRESS_PASSWORD_FILE="$2"; '
+            "podcast_already_published() { return 1; }; "
+            "mock_cli() { echo unexpected-cli; }; CLI=mock_cli; "
+            "run_podcast scalable_stories 2026-09-08; "
+            '[ "${GPS_WP_USER+x}${GPS_WP_APP_PASSWORD+x}" = "" ] || exit 92; '
+            'printf "%s" "$PIPELINE_FAILURES"',
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
+            str(password_file),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "GPS_WP_USER": "stale-user",
+            "GPS_WP_APP_PASSWORD": "stale-secret",
+        },
     )
+    assert "scalable_stories (credential unavailable)" in result.stdout
+    assert "unexpected-cli" not in result.stdout
+    assert "test-secret" not in result.stdout + result.stderr
+    assert "stale-secret" not in result.stdout + result.stderr
 
 
 def test_failure_alert_calls_system_mcp(tmp_path: Path) -> None:
@@ -145,7 +235,7 @@ def test_published_podcast_is_detected_from_authoritative_digest(
             "bash",
             "-c",
             'source "$1"; CONTENT_DB="$2"; '
-            'podcast_already_published scalable_stories 2026-08-24',
+            "podcast_already_published scalable_stories 2026-08-24",
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
             str(database),
@@ -159,7 +249,7 @@ def test_published_podcast_is_detected_from_authoritative_digest(
             "bash",
             "-c",
             'source "$1"; CONTENT_DB="$2"; '
-            'podcast_already_published crosswire 2026-08-24',
+            "podcast_already_published crosswire 2026-08-24",
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
             str(database),
@@ -169,25 +259,34 @@ def test_published_podcast_is_detected_from_authoritative_digest(
     assert missing.returncode == 1
 
 
-def test_main_pins_one_logical_date_across_midnight(tmp_path: Path) -> None:
-    """Every stage keeps the date captured once when the runner starts."""
+@pytest.mark.parametrize("credential_available", [True, False])
+def test_main_pins_one_logical_date_across_midnight(
+    tmp_path: Path, credential_available: bool
+) -> None:
+    """Pin dates and advance the marker only when every show succeeds."""
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     (fake_home / ".secrets").write_text("", encoding="utf-8")
-    security = tmp_path / "security"
-    security.write_text("#!/bin/bash\nprintf 'test-password\\n'\n", encoding="utf-8")
-    security.chmod(0o755)
+    credential_dir = (
+        fake_home / "Library/Application Support/telegram_translator/credentials"
+    )
+    credential_dir.mkdir(parents=True, mode=0o700)
+    password_file = credential_dir / "scalable-stories-wordpress-password"
+    password_file.write_text("test-password\n", encoding="utf-8")
+    password_file.chmod(0o600)
+    if not credential_available:
+        password_file.unlink()
     capture = tmp_path / "calls"
     date_called = tmp_path / "date-called"
     state_dir = tmp_path / "state"
 
-    shell = r'''
+    shell = r"""
 source "$1"
 STATE_DIR="$2"
 SUCCESS_FILE="$STATE_DIR/success"
 LOCK_FILE="$STATE_DIR/lock"
 CONTENT_DB="$STATE_DIR/content.sqlite"
-SECURITY_BIN="$3"
+WORDPRESS_PASSWORD_FILE="$3"
 CAPTURE="$4"
 DATE_CALLED="$5"
 PROJECT_DIR="$6"
@@ -206,10 +305,11 @@ podcast_already_published() {
     return 1
 }
 mock_cli() { printf 'cli %s\n' "$*" >> "$CAPTURE"; }
+alert_failures() { printf 'alert %s %s\n' "$1" "$PIPELINE_FAILURES" >> "$CAPTURE"; }
 CLI=mock_cli
 main
-'''
-    subprocess.run(
+"""
+    result = subprocess.run(
         [
             "bash",
             "-c",
@@ -217,12 +317,12 @@ main
             "bash",
             str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
             str(state_dir),
-            str(security),
+            str(password_file),
             str(capture),
             str(date_called),
             str(Path(__file__).resolve().parents[1]),
         ],
-        check=True,
+        check=False,
         env=os.environ | {"HOME": str(fake_home)},
     )
 
@@ -230,7 +330,14 @@ main
     assert calls[0] == "cli digest collect --date 2026-08-25"
     assert all("2026-08-25" in call for call in calls)
     assert not any("2026-08-26" in call for call in calls)
-    assert (state_dir / "success").read_text(encoding="utf-8") == "2026-08-25\n"
+    assert any("digest publish" in call and "vaske_daily" in call for call in calls)
+    if credential_available:
+        assert result.returncode == 0
+        assert (state_dir / "success").read_text(encoding="utf-8") == "2026-08-25\n"
+    else:
+        assert result.returncode == 1
+        assert not (state_dir / "success").exists()
+        assert calls[-1] == "alert 2026-08-25 scalable_stories (credential unavailable)"
 
 
 def test_retry_skip_uses_publication_fact_and_local_artifact(
@@ -375,16 +482,14 @@ def test_cron_installer_replaces_only_podcast_entry(tmp_path: Path) -> None:
     fake_crontab = tmp_path / "crontab-bin"
     fake_crontab.write_text(
         "#!/bin/bash\n"
-        "if [ \"$3\" = \"-l\" ]; then cat \"$CRON_STORE\"; "
-        "else cp \"$3\" \"$CRON_STORE\"; fi\n",
+        'if [ "$3" = "-l" ]; then cat "$CRON_STORE"; '
+        'else cp "$3" "$CRON_STORE"; fi\n',
         encoding="utf-8",
     )
     fake_crontab.chmod(0o755)
     fake_sudo = tmp_path / "sudo-bin"
     fake_sudo.write_text(
-        "#!/bin/bash\n"
-        "if [ \"$1\" = \"-v\" ]; then exit 0; fi\n"
-        "exec \"$@\"\n",
+        "#!/bin/bash\n" 'if [ "$1" = "-v" ]; then exit 0; fi\n' 'exec "$@"\n',
         encoding="utf-8",
     )
     fake_sudo.chmod(0o755)
