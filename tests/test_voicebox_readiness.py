@@ -226,6 +226,116 @@ async def test_generate_segment_forwards_voice_instruction(monkeypatch, tmp_path
     assert client.payload["instruct"] == instruction
 
 
+class _FlakyGenerationClient:
+    """Fail the POST ``fail_times`` times, then succeed.
+
+    Each ``httpx.AsyncClient(...)`` call re-enters the same instance, so
+    the failure counter spans the whole retry loop.
+    """
+
+    def __init__(self, error, fail_times):
+        self._error = error
+        self._fail_times = fail_times
+        self.post_calls = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, json):
+        self.post_calls += 1
+        if self.post_calls <= self._fail_times:
+            raise self._error
+        return _ok_response({"id": "generation-1", "duration": 1.0})
+
+    async def get(self, url):
+        response = _ok_response(None)
+        response.content = b"RIFF-placeholder"
+        return response
+
+
+def _segment_generator(tmp_path):
+    generator = PodcastGenerator(
+        {
+            "name": "test",
+            "voicebox_url": "http://localhost:17493",
+            "voice_profile": "profile-id",
+            "output_dir": str(tmp_path),
+            "segment_max_attempts": 4,
+        }
+    )
+    generator._profile_id = "profile-id"
+    return generator
+
+
+@pytest.mark.asyncio
+async def test_generate_segment_retries_transient_timeout(monkeypatch, tmp_path):
+    """A connection/timeout blip mid-episode must self-heal, not abort."""
+    sleeps = _patch_sleep(monkeypatch)
+    generator = _segment_generator(tmp_path)
+    client = _FlakyGenerationClient(httpx.ReadTimeout("upstream busy"), fail_times=2)
+    _patch_async_client(monkeypatch, client)
+
+    out = await generator.generate_segment("Hello.", tmp_path / "seg.wav")
+
+    assert out.exists()
+    assert client.post_calls == 3  # two failures + one success
+    assert len(sleeps) == 2  # one backoff before each retry
+
+
+@pytest.mark.asyncio
+async def test_generate_segment_retries_transient_5xx(monkeypatch, tmp_path):
+    """A 503 from Voicebox is transient and must be retried."""
+    _patch_sleep(monkeypatch)
+    generator = _segment_generator(tmp_path)
+    resp = MagicMock()
+    resp.status_code = 503
+    resp.text = "service unavailable"
+    error = httpx.HTTPStatusError("503", request=MagicMock(), response=resp)
+    client = _FlakyGenerationClient(error, fail_times=1)
+    _patch_async_client(monkeypatch, client)
+
+    out = await generator.generate_segment("Hello.", tmp_path / "seg.wav")
+
+    assert out.exists()
+    assert client.post_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_segment_does_not_retry_deterministic_4xx(monkeypatch, tmp_path):
+    """A 400 (bad text/profile) is deterministic — fail fast, no retries."""
+    sleeps = _patch_sleep(monkeypatch)
+    generator = _segment_generator(tmp_path)
+    resp = MagicMock()
+    resp.status_code = 400
+    resp.text = "bad request"
+    error = httpx.HTTPStatusError("400", request=MagicMock(), response=resp)
+    client = _FlakyGenerationClient(error, fail_times=99)
+    _patch_async_client(monkeypatch, client)
+
+    with pytest.raises(RuntimeError, match="Voicebox generation failed"):
+        await generator.generate_segment("Hello.", tmp_path / "seg.wav")
+
+    assert client.post_calls == 1  # no retry on a 4xx
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_generate_segment_raises_after_exhausting_attempts(monkeypatch, tmp_path):
+    """Persistent transient failure exhausts the budget, then raises."""
+    _patch_sleep(monkeypatch)
+    generator = _segment_generator(tmp_path)
+    client = _FlakyGenerationClient(httpx.ConnectError("down"), fail_times=99)
+    _patch_async_client(monkeypatch, client)
+
+    with pytest.raises(RuntimeError, match="Voicebox generation failed"):
+        await generator.generate_segment("Hello.", tmp_path / "seg.wav")
+
+    assert client.post_calls == 4  # segment_max_attempts
+
+
 def test_voice_instruction_participates_in_tts_cache_key(tmp_path):
     """Changing delivery direction must not reuse a stale TTS segment."""
     base = {

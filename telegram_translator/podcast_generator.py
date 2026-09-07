@@ -35,6 +35,16 @@ _RU_CLITIC_RE = re.compile(
 # every backend receives an unambiguous pronunciation cue.
 _NGINX_RE = re.compile(r"\bnginx\b", re.IGNORECASE)
 
+# HTTP statuses worth retrying on the per-segment Voicebox call: rate limit
+# plus the standard transient server-side family. A 4xx other than 429 is a
+# deterministic client error (bad text/profile) and is never retried.
+_TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+def _is_transient_status(status: int) -> bool:
+    """True for HTTP statuses that a retry could plausibly clear."""
+    return status in _TRANSIENT_HTTP_STATUSES
+
 
 def _glue_ru_clitics(text: str) -> str:
     """Glue Russian clitic particles to their host word for cleaner TTS.
@@ -362,6 +372,14 @@ class PodcastGenerator:
             and not -36.0 <= self.voice_target_lufs <= -9.0
         ):
             raise ValueError("voice_target_lufs must be between -36 and -9")
+
+        # Transient-failure retry for the per-segment Voicebox call. The
+        # nightly run is unattended, so a single timeout / connection blip /
+        # 5xx mid-episode must self-heal rather than abort the whole podcast.
+        self.segment_max_attempts = max(1, int(config.get("segment_max_attempts", 4)))
+        self.segment_retry_base_delay = float(
+            config.get("segment_retry_base_delay_seconds", 3.0)
+        )
 
         self._profile_id: Optional[str] = None
 
@@ -754,60 +772,88 @@ class PodcastGenerator:
         if self.voice_instruct:
             payload["instruct"] = self.voice_instruct
 
-        try:
-            async with httpx.AsyncClient(timeout=900) as client:
-                response = await client.post(
-                    f"{self.voicebox_url}/generate",
-                    json=payload,
+        # Bounded retry over TRANSIENT failures only (timeout, connection
+        # drop, 5xx, 429). A deterministic 4xx (bad text/profile) is not
+        # retried — retrying it just wastes the budget and delays the fail.
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(1, self.segment_max_attempts + 1):
+            try:
+                async with httpx.AsyncClient(timeout=900) as client:
+                    response = await client.post(
+                        f"{self.voicebox_url}/generate",
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    generation_id = result["id"]
+                    duration = result.get("duration", 0)
+                    logger.info(
+                        "Generation %s complete (%.1fs audio)",
+                        generation_id,
+                        duration,
+                    )
+
+                    audio_response = await client.get(
+                        f"{self.voicebox_url}/audio/{generation_id}",
+                    )
+                    audio_response.raise_for_status()
+
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_bytes(audio_response.content)
+                    logger.info(
+                        "Saved audio segment: %s (%d bytes)",
+                        output_path,
+                        len(audio_response.content),
+                    )
+
+                    # Save to TTS cache
+                    if cached:
+                        cached.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(output_path, cached)
+
+                    return output_path
+
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code if e.response is not None else 0
+                body = e.response.text[:500] if e.response is not None else ""
+                if not _is_transient_status(status):
+                    logger.error(
+                        "Voicebox %d on segment (%d chars): %s | body=%s | text=%r",
+                        status,
+                        len(text),
+                        e,
+                        body,
+                        text,
+                    )
+                    raise RuntimeError(
+                        f"Voicebox generation failed for segment: {body}"
+                    )
+                last_error = e
+                logger.warning(
+                    "Voicebox %d on segment (attempt %d/%d); retrying",
+                    status,
+                    attempt,
+                    self.segment_max_attempts,
                 )
-                response.raise_for_status()
-                result = response.json()
-                generation_id = result["id"]
-                duration = result.get("duration", 0)
-                logger.info(
-                    "Generation %s complete (%.1fs audio)",
-                    generation_id,
-                    duration,
+            except httpx.HTTPError as e:
+                # Timeout / connection error — transient by nature.
+                last_error = e
+                logger.warning(
+                    "Voicebox request failed (attempt %d/%d); retrying: %s",
+                    attempt,
+                    self.segment_max_attempts,
+                    e,
                 )
 
-                audio_response = await client.get(
-                    f"{self.voicebox_url}/audio/{generation_id}",
-                )
-                audio_response.raise_for_status()
+            if attempt < self.segment_max_attempts:
+                await asyncio.sleep(self.segment_retry_base_delay * attempt)
 
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_bytes(audio_response.content)
-                logger.info(
-                    "Saved audio segment: %s (%d bytes)",
-                    output_path,
-                    len(audio_response.content),
-                )
-
-                # Save to TTS cache
-                if cached:
-                    cached.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(output_path, cached)
-
-                return output_path
-
-        except httpx.HTTPStatusError as e:
-            body = e.response.text[:500] if e.response is not None else ""
-            logger.error(
-                "Voicebox %d on segment (%d chars): %s | body=%s | text=%r",
-                e.response.status_code if e.response is not None else 0,
-                len(text),
-                e,
-                body,
-                text,
-            )
-            raise RuntimeError(
-                f"Voicebox generation failed for segment: {body}"
-            )
-        except httpx.HTTPError:
-            logger.error("Voicebox request failed", exc_info=True)
-            raise RuntimeError(
-                "Voicebox generation failed for segment"
-            )
+        logger.error(
+            "Voicebox segment failed after %d attempts: %s",
+            self.segment_max_attempts,
+            last_error,
+        )
+        raise RuntimeError("Voicebox generation failed for segment")
 
     async def generate_podcast(
         self,
