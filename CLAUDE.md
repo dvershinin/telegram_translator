@@ -69,9 +69,9 @@ Daily cron (`crontab -l`) runs `scripts/daily_podcasts.sh` once at 04:00 local u
 - API at `http://localhost:17493` (configurable per-podcast via `voicebox.url`)
 - POST `/generate` returns JSON with `id` and `duration` (not raw audio)
 - GET `/audio/{id}` returns the WAV file
-- TTS is slow on Apple Silicon MLX (~8 min per 500-char segment)
+- English TTS runs on Qwen3 MLX. Since 2026-09-07 the launchd service pins `VOICEBOX_QWEN_MODEL_ID=mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit` (RTF ~2 on this M2, ~30-40 s per 500-char segment); the bf16 default was ~5x slower (~3 min/segment, ~75 min per episode)
 - Scripts split at 500-char sentence boundaries, ~13 segments for a 6-min podcast
-- Total generation time: ~90 minutes for a full podcast
+- Total generation time: ~15 minutes for a full podcast on the 8bit model
 - Backend: `cd ~/Projects/voicebox && backend/venv/bin/uvicorn backend.main:app --port 17493`
 - `voice_profile` accepts either a profile name or a profile UUID. `PodcastGenerator._get_profile_id` tries UUID match first, then case-insensitive name match — pin immutable UUIDs in config when the profile's name might change.
 
