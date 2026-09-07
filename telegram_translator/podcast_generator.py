@@ -739,12 +739,16 @@ class PodcastGenerator:
         self,
         text: str,
         output_path: Path,
+        segment_index: int | None = None,
     ) -> Path:
         """Generate audio for a single text segment via Voicebox.
 
         Args:
             text: Text to speak (must be <= 5000 chars).
             output_path: Where to save the WAV file.
+            segment_index: Zero-based index of this segment within the
+                episode, used in logs and error messages so a failure
+                names the exact segment.
 
         Returns:
             Path to the generated WAV file.
@@ -753,13 +757,17 @@ class PodcastGenerator:
             RuntimeError: If generation fails.
         """
         text = _prepare_tts_text(text, self.language)
+        label = f"{self.podcast_name} segment"
+        if segment_index is not None:
+            label = f"{label} {segment_index}"
+        started = time.monotonic()
 
         # Check TTS cache
         cached = self._tts_cache_path(text)
         if cached and cached.exists():
             output_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(cached, output_path)
-            logger.info("TTS cache hit for segment")
+            logger.info("TTS cache hit for %s", label)
             return output_path
 
         profile_id = await self._get_profile_id()
@@ -801,9 +809,11 @@ class PodcastGenerator:
                     output_path.parent.mkdir(parents=True, exist_ok=True)
                     output_path.write_bytes(audio_response.content)
                     logger.info(
-                        "Saved audio segment: %s (%d bytes)",
+                        "Saved audio for %s: %s (%d bytes, %.1fs wall)",
+                        label,
                         output_path,
                         len(audio_response.content),
+                        time.monotonic() - started,
                     )
 
                     # Save to TTS cache
@@ -818,42 +828,63 @@ class PodcastGenerator:
                 body = e.response.text[:500] if e.response is not None else ""
                 if not _is_transient_status(status):
                     logger.error(
-                        "Voicebox %d on segment (%d chars): %s | body=%s | text=%r",
+                        "Voicebox %d on %s (%d chars, attempt %d/%d, "
+                        "%.1fs elapsed): %r | body=%s | text=%r",
                         status,
+                        label,
                         len(text),
+                        attempt,
+                        self.segment_max_attempts,
+                        time.monotonic() - started,
                         e,
                         body,
                         text,
                     )
                     raise RuntimeError(
-                        f"Voicebox generation failed for segment: {body}"
+                        f"Voicebox generation failed for {label}: "
+                        f"HTTP {status}: {body}"
                     )
                 last_error = e
                 logger.warning(
-                    "Voicebox %d on segment (attempt %d/%d); retrying",
+                    "Voicebox %d on %s (attempt %d/%d, %.1fs elapsed); "
+                    "retrying: %r",
                     status,
+                    label,
                     attempt,
                     self.segment_max_attempts,
+                    time.monotonic() - started,
+                    e,
                 )
             except httpx.HTTPError as e:
                 # Timeout / connection error — transient by nature.
                 last_error = e
                 logger.warning(
-                    "Voicebox request failed (attempt %d/%d); retrying: %s",
+                    "Voicebox %s on %s (attempt %d/%d, %.1fs elapsed); "
+                    "retrying: %r",
+                    type(e).__name__,
+                    label,
                     attempt,
                     self.segment_max_attempts,
+                    time.monotonic() - started,
                     e,
                 )
 
             if attempt < self.segment_max_attempts:
                 await asyncio.sleep(self.segment_retry_base_delay * attempt)
 
+        elapsed = time.monotonic() - started
         logger.error(
-            "Voicebox segment failed after %d attempts: %s",
+            "Voicebox %s failed after %d attempts (%.1fs elapsed): %r",
+            label,
             self.segment_max_attempts,
+            elapsed,
             last_error,
         )
-        raise RuntimeError("Voicebox generation failed for segment")
+        raise RuntimeError(
+            f"Voicebox generation failed for {label} after "
+            f"{self.segment_max_attempts} attempts ({elapsed:.1f}s): "
+            f"{type(last_error).__name__}: {last_error!r}"
+        )
 
     async def generate_podcast(
         self,
@@ -897,10 +928,16 @@ class PodcastGenerator:
         segment_paths = []
         for i, segment_text in enumerate(segments):
             segment_path = segment_dir / f"segment_{i:03d}.wav"
-            await self.generate_segment(segment_text, segment_path)
+            seg_started = time.monotonic()
+            await self.generate_segment(
+                segment_text, segment_path, segment_index=i
+            )
             segment_paths.append(segment_path)
             logger.info(
-                "Generated segment %d/%d", i + 1, len(segments)
+                "Generated segment %d/%d in %.1fs",
+                i + 1,
+                len(segments),
+                time.monotonic() - seg_started,
             )
 
         # Output filename includes podcast name

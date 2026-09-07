@@ -109,6 +109,8 @@ def test_failure_alert_calls_system_mcp(tmp_path: Path) -> None:
     args = capture.read_text(encoding="utf-8")
     assert "human_action_alert" in args
     assert "Daily podcast pipeline failed" in args
+    assert "daily_podcasts_2026-08-25.log" in args
+    assert "/tmp/" not in args
     assert "re-run that date after fixing the cause" in args
     assert "working_directory=/Users/danila/Projects/telegram_translator" in args
 
@@ -322,8 +324,42 @@ def test_cron_is_night_only_and_cannot_truncate_active_log() -> None:
     """The installed source line runs once at night and only appends logs."""
     entry = CRON_ENTRY.read_text(encoding="utf-8").strip()
     assert entry.startswith("0 4 * * * ")
-    assert ">>/tmp/daily_podcasts.log 2>&1" in entry
-    assert " >/tmp/daily_podcasts.log" not in entry
+    # The fallback log must survive reboot: /tmp is wiped, which destroyed
+    # the 2026-09-07 failure evidence.
+    assert "/tmp/" not in entry
+    assert 'mkdir -p "$HOME/Library/Logs/telegram_translator"' in entry
+    assert '>>"$HOME/Library/Logs/telegram_translator/daily_podcasts.log" 2>&1' in entry
+
+
+def test_runner_logs_to_durable_dated_file_with_retention(tmp_path: Path) -> None:
+    """setup_logging appends to a dated reboot-surviving log and prunes old ones."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    stale = log_dir / "daily_podcasts_2020-01-01.log"
+    stale.write_text("old\n", encoding="utf-8")
+    os.utime(stale, (0, 0))
+    fresh = log_dir / "daily_podcasts_2026-09-06.log"
+    fresh.write_text("recent\n", encoding="utf-8")
+
+    subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; LOG_DIR="$2"; '
+            'setup_logging 2026-09-07; echo "inside the log"',
+            "bash",
+            str(Path(__file__).resolve().parents[1] / "scripts/daily_podcasts.sh"),
+            str(log_dir),
+        ],
+        check=True,
+    )
+
+    dated = log_dir / "daily_podcasts_2026-09-07.log"
+    content = dated.read_text(encoding="utf-8")
+    assert "daily podcast run started" in content
+    assert "inside the log" in content
+    assert not stale.exists()
+    assert fresh.exists()
 
 
 def test_cron_installer_replaces_only_podcast_entry(tmp_path: Path) -> None:

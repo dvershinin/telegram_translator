@@ -1,1 +1,1 @@
-0 4 * * * /Users/danila/Projects/telegram_translator/scripts/daily_podcasts.sh >>/tmp/daily_podcasts.log 2>&1
+0 4 * * * mkdir -p "$HOME/Library/Logs/telegram_translator"; /Users/danila/Projects/telegram_translator/scripts/daily_podcasts.sh >>"$HOME/Library/Logs/telegram_translator/daily_podcasts.log" 2>&1

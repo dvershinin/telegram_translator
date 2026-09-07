@@ -15,7 +15,20 @@ SHLOCK_BIN="${SHLOCK_BIN:-/usr/bin/shlock}"
 MCP_DEV="${MCP_DEV:-/Users/danila/.virtualenvs/mcps/bin/mcp-dev}"
 CLI="python3 -m telegram_translator.cli"
 VOICEBOX_URL="${VOICEBOX_URL:-http://localhost:17493}"
+LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/telegram_translator}"
+LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-60}"
 PIPELINE_FAILURES=""
+
+setup_logging() {
+    # Redirect all further output to a reboot-surviving dated log. /tmp is
+    # wiped on reboot, which made the 2026-09-07 crosswire failure unpinnable.
+    local run_date="$1"
+    mkdir -p "$LOG_DIR" || return 0
+    exec >> "$LOG_DIR/daily_podcasts_$run_date.log" 2>&1
+    echo "=== daily podcast run started $(date '+%Y-%m-%dT%H:%M:%S%z') (episode date $run_date) ==="
+    find "$LOG_DIR" -name 'daily_podcasts_*.log' \
+        -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
+}
 
 record_failure() {
     local name="$1"
@@ -34,7 +47,7 @@ alert_failures() {
     fi
     "$MCP_DEV" call system human_action_alert \
         --arg "title=Daily podcast pipeline failed" \
-        --arg "body=The scheduled podcast run for $run_date failed for: $PIPELINE_FAILURES. Inspect /tmp/daily_podcasts.log, then re-run that date after fixing the cause." \
+        --arg "body=The scheduled podcast run for $run_date failed for: $PIPELINE_FAILURES. Inspect $LOG_DIR/daily_podcasts_$run_date.log, then re-run that date after fixing the cause." \
         --arg "urgency=attention" \
         --arg "dedupe_key=telegram-translator-daily-podcasts-$run_date" \
         --arg "cooldown_seconds=82800" \
@@ -107,6 +120,7 @@ run_podcast() {
 main() {
     local run_date
     run_date="$(date +%Y-%m-%d)"
+    setup_logging "$run_date"
     mkdir -p "$STATE_DIR"
 
     if [ "$(cat "$SUCCESS_FILE" 2>/dev/null)" = "$run_date" ]; then

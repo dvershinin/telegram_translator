@@ -315,11 +315,18 @@ async def test_generate_segment_does_not_retry_deterministic_4xx(monkeypatch, tm
     client = _FlakyGenerationClient(error, fail_times=99)
     _patch_async_client(monkeypatch, client)
 
-    with pytest.raises(RuntimeError, match="Voicebox generation failed"):
-        await generator.generate_segment("Hello.", tmp_path / "seg.wav")
+    with pytest.raises(RuntimeError) as excinfo:
+        await generator.generate_segment(
+            "Hello.", tmp_path / "seg.wav", segment_index=3
+        )
 
     assert client.post_calls == 1  # no retry on a 4xx
     assert sleeps == []
+    # The error must name the exact segment and HTTP status at a glance.
+    message = str(excinfo.value)
+    assert "test segment 3" in message
+    assert "HTTP 400" in message
+    assert "bad request" in message
 
 
 @pytest.mark.asyncio
@@ -330,10 +337,20 @@ async def test_generate_segment_raises_after_exhausting_attempts(monkeypatch, tm
     client = _FlakyGenerationClient(httpx.ConnectError("down"), fail_times=99)
     _patch_async_client(monkeypatch, client)
 
-    with pytest.raises(RuntimeError, match="Voicebox generation failed"):
-        await generator.generate_segment("Hello.", tmp_path / "seg.wav")
+    with pytest.raises(RuntimeError) as excinfo:
+        await generator.generate_segment(
+            "Hello.", tmp_path / "seg.wav", segment_index=7
+        )
 
     assert client.post_calls == 4  # segment_max_attempts
+    # A bodyless transport error made the 2026-09-07 failure unpinnable:
+    # the message must carry the segment, attempts, elapsed time, and the
+    # exact exception type/repr.
+    message = str(excinfo.value)
+    assert "test segment 7" in message
+    assert "after 4 attempts" in message
+    assert "ConnectError" in message
+    assert "down" in message
 
 
 def test_voice_instruction_participates_in_tts_cache_key(tmp_path):
