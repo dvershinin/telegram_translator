@@ -3,6 +3,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlsplit
 from appdirs import user_data_dir, user_config_dir
 
 from telegram_translator.llm_env import DEFAULT_ROLE
@@ -11,9 +12,15 @@ logger = logging.getLogger(__name__)
 
 # Keys that a destination-scoped podcast must NOT set in its per-podcast
 # ``publish:`` block — they come from the destination.
-_FORBIDDEN_PODCAST_PUBLISH_KEYS = ("base_url", "publish_dir", "sync_command")
+_FORBIDDEN_PODCAST_PUBLISH_KEYS = (
+    "base_url",
+    "publish_dir",
+    "sync_command",
+    "private_token_file",
+)
 
 _VALID_DESTINATION_TYPES = ("static", "astro_collection", "wordpress")
+_VALID_INPUT_MODES = ("news", "external_script")
 
 class ConfigManager:
     """Manages configuration for the Telegram Translator app"""
@@ -196,6 +203,33 @@ class ConfigManager:
                 "sync_command": sync_command,
             }
 
+            private_token_file = cfg.get("private_token_file")
+            if private_token_file is not None:
+                token_path = Path(str(private_token_file))
+                parsed_url = urlsplit(base_url)
+                if dest_type != "static":
+                    raise ValueError(
+                        f"Private destination '{name}' must have type 'static'"
+                    )
+                if not token_path.is_absolute():
+                    raise ValueError(
+                        f"Private destination '{name}' requires an absolute "
+                        "private_token_file path"
+                    )
+                if (
+                    parsed_url.scheme != "https"
+                    or not parsed_url.netloc
+                    or parsed_url.query
+                    or parsed_url.fragment
+                    or parsed_url.username
+                    or parsed_url.password
+                ):
+                    raise ValueError(
+                        f"Private destination '{name}' requires a query-free "
+                        "HTTPS base_url"
+                    )
+                entry["private_token_file"] = str(token_path)
+
             if dest_type == "static":
                 publish_dir = cfg.get("publish_dir")
                 if not publish_dir:
@@ -276,7 +310,11 @@ class ConfigManager:
         podcasts_raw = self.config.get("podcasts")
         if not podcasts_raw:
             # Legacy fallback: synthesise _default from flat sections
-            return {"_default": self._build_legacy_podcast_config()}
+            resolved = {"_default": self._build_legacy_podcast_config()}
+            self._validate_destination_grouping(
+                resolved, self.resolve_destinations()
+            )
+            return resolved
 
         destinations = self.resolve_destinations()
         resolved = {
@@ -362,6 +400,16 @@ class ConfigManager:
                         f"(slug=''): {names}"
                     )
 
+        for dest_name, destination in destinations.items():
+            if not destination.get("private_token_file"):
+                continue
+            podcasts = groups.get(dest_name, [])
+            if len(podcasts) != 1 or podcasts[0].get("slug") != "":
+                raise ValueError(
+                    f"Private destination '{dest_name}' must host exactly "
+                    "one root-mounted podcast (slug='')"
+                )
+
     def get_podcast_config(self, name: str) -> Dict[str, Any]:
         """Return the resolved config for a single podcast.
 
@@ -410,6 +458,12 @@ class ConfigManager:
                 its ``publish:`` block contains forbidden destination-level
                 keys.
         """
+        input_mode = cfg.get("input_mode", "news")
+        if input_mode not in _VALID_INPUT_MODES:
+            raise ValueError(
+                f"Podcast '{name}' has invalid input_mode '{input_mode}'. "
+                f"Must be one of: {', '.join(_VALID_INPUT_MODES)}"
+            )
         global_sources = self.config.get("sources", {})
         global_telegram = global_sources.get("telegram", {})
         global_web = global_sources.get("web", {})
@@ -441,6 +495,7 @@ class ConfigManager:
 
         return {
             "name": name,
+            "input_mode": input_mode,
             "title": cfg.get("title", name),
             "host_name": cfg.get("host_name", ""),
             "sources": {
@@ -580,6 +635,8 @@ class ConfigManager:
             publish["base_url"] = derived_base_url
             publish["publish_dir"] = derived_publish_dir
             publish["sync_command"] = dest.get("sync_command", "")
+            if dest.get("private_token_file"):
+                publish["private_token_file"] = dest["private_token_file"]
             return publish, dest_ref, dest_type, slug
 
         if dest_type == "wordpress":
@@ -627,6 +684,7 @@ class ConfigManager:
 
         return {
             "name": "_default",
+            "input_mode": "news",
             "title": "Daily Digest",
             "host_name": "",
             "sources": all_sources,

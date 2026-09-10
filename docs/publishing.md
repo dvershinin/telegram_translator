@@ -87,6 +87,29 @@ telegram-translator digest podcast --podcast crosswire
 telegram-translator digest publish --podcast crosswire
 ```
 
+## Exact-Script Private Podcast
+
+Set `input_mode: external_script` on a podcast that is the only root-mounted
+show (`slug: ""`) on a dedicated static destination. Configure the destination
+with a query-free HTTPS `base_url` and an absolute `private_token_file`; keep
+the URL-safe token (32 or more characters) only in that owner-owned `0600`
+file, inside its owner-owned `0700` parent directory. Symlinks and hard links
+are rejected.
+
+The exact daily script is read from standard input with a 64 KiB limit:
+
+```bash
+telegram-translator digest ingest --podcast morning_brief --date 2026-09-10 < script.txt
+telegram-translator digest podcast --podcast morning_brief --date 2026-09-10
+telegram-translator digest publish --podcast morning_brief --date 2026-09-10
+```
+
+An exact ingest retry is idempotent. A different script for the same podcast
+and date is rejected, including after publication. The private token is added
+as `token=...` to every URL in the generated RSS feed. Private destinations
+generate neither a per-show HTML page nor a public root site index, and a
+missing or unsafe credential aborts publishing without a public fallback.
+
 ## Feed-Only Rebuild
 
 To fix metadata without re-encoding audio:

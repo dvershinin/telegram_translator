@@ -799,3 +799,112 @@ class TestGroupPodcastsByDestination:
             tmp_path,
         )
         assert mgr.group_podcasts_by_destination() == {}
+
+
+class TestPrivateStaticDestination:
+    """Validate dedicated token-protected static destination constraints."""
+
+    def _private_config(self, tmp_path: Path) -> dict:
+        """Return one valid private root-mounted podcast configuration."""
+        return {
+            "destinations": {
+                "private": {
+                    "type": "static",
+                    "base_url": "https://podcasts.example.com/morning",
+                    "publish_dir": "./publish/private",
+                    "private_token_file": str(tmp_path / "token"),
+                }
+            },
+            "podcasts": {
+                "morning": {
+                    "destination": "private",
+                    "slug": "",
+                    "input_mode": "external_script",
+                }
+            },
+        }
+
+    def test_resolves_private_token_path_only_into_private_show(
+        self, tmp_path: Path,
+    ) -> None:
+        """Carry only the credential path into the resolved publish config."""
+        mgr = _make_mgr(self._private_config(tmp_path), tmp_path)
+
+        destination = mgr.resolve_destinations()["private"]
+        podcast = mgr.resolve_podcast_configs()["morning"]
+
+        assert destination["private_token_file"] == str(tmp_path / "token")
+        assert podcast["publish"]["private_token_file"] == str(
+            tmp_path / "token"
+        )
+        assert podcast["input_mode"] == "external_script"
+        assert "token" not in podcast["publish"]
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://podcasts.example.com/morning",
+            "https://podcasts.example.com/morning?token=in-config",
+            "https://podcasts.example.com/morning#fragment",
+        ],
+    )
+    def test_rejects_unprotected_or_query_bearing_base_url(
+        self, tmp_path: Path, base_url: str,
+    ) -> None:
+        """Require a query-free HTTPS origin before token decoration."""
+        config = self._private_config(tmp_path)
+        config["destinations"]["private"]["base_url"] = base_url
+
+        with pytest.raises(ValueError, match="query-free HTTPS"):
+            _make_mgr(config, tmp_path).resolve_destinations()
+
+    def test_rejects_relative_token_file(self, tmp_path: Path) -> None:
+        """Require an absolute owner-local credential path."""
+        config = self._private_config(tmp_path)
+        config["destinations"]["private"]["private_token_file"] = "token"
+
+        with pytest.raises(ValueError, match="absolute"):
+            _make_mgr(config, tmp_path).resolve_destinations()
+
+    @pytest.mark.parametrize(
+        "podcasts",
+        [
+            {
+                "morning": {
+                    "destination": "private",
+                    "slug": "subpath",
+                }
+            },
+            {
+                "morning": {"destination": "private", "slug": ""},
+                "second": {"destination": "private", "slug": ""},
+            },
+        ],
+    )
+    def test_rejects_non_dedicated_private_destination(
+        self, tmp_path: Path, podcasts: dict,
+    ) -> None:
+        """Require exactly one root-mounted show on a private destination."""
+        config = self._private_config(tmp_path)
+        config["podcasts"] = podcasts
+
+        with pytest.raises(ValueError, match="root-mounted"):
+            _make_mgr(config, tmp_path).resolve_podcast_configs()
+
+    def test_rejects_unknown_input_mode(self, tmp_path: Path) -> None:
+        """Reject misspelled modes that could route external prose to an LLM."""
+        config = self._private_config(tmp_path)
+        config["podcasts"]["morning"]["input_mode"] = "external"
+
+        with pytest.raises(ValueError, match="invalid input_mode"):
+            _make_mgr(config, tmp_path).resolve_podcast_configs()
+
+    def test_rejects_private_destination_without_named_podcasts(
+        self, tmp_path: Path,
+    ) -> None:
+        """Reject an unbound private destination in legacy configuration."""
+        config = self._private_config(tmp_path)
+        del config["podcasts"]
+
+        with pytest.raises(ValueError, match="exactly one root-mounted"):
+            _make_mgr(config, tmp_path).resolve_podcast_configs()

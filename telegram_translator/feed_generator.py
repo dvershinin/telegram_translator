@@ -13,6 +13,7 @@ import re
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from pathlib import Path
+from typing import Optional
 from xml.etree.ElementTree import (
     Element,
     ElementTree,
@@ -20,6 +21,8 @@ from xml.etree.ElementTree import (
     indent,
     register_namespace,
 )
+
+from telegram_translator.private_feed import add_private_feed_token
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +218,7 @@ class PodcastFeed:
         copyright_text: str = "",
         owner_name: str = "",
         owner_email: str = "",
+        private_token: Optional[str] = None,
     ):
         """Initialize the feed generator.
 
@@ -232,20 +236,32 @@ class PodcastFeed:
             copyright_text: Copyright notice text.
             owner_name: Show owner name for itunes:owner.
             owner_email: Show owner email for itunes:owner.
+            private_token: Optional token added to every generated asset URL.
         """
         self.title = title
         self.base_url = base_url.rstrip("/")
+        self.private_token = private_token
         self.description = description
         self.author = author
         self.language = language
         self.category = category
         self.subcategory = subcategory
-        self.artwork_url = artwork_url or f"{self.base_url}/artwork.jpg"
+        self.artwork_url = self._protect_url(
+            artwork_url or f"{self.base_url}/artwork.jpg"
+        )
         self.explicit = explicit
-        self.feed_url = feed_url or f"{self.base_url}/feed.xml"
+        self.feed_url = self._protect_url(
+            feed_url or f"{self.base_url}/feed.xml"
+        )
         self.copyright_text = copyright_text
         self.owner_name = owner_name
         self.owner_email = owner_email
+
+    def _protect_url(self, url: str) -> str:
+        """Add the configured private token to one generated URL."""
+        if not self.private_token:
+            return url
+        return add_private_feed_token(url, self.private_token)
 
     def generate(
         self,
@@ -271,7 +287,9 @@ class PodcastFeed:
 
         # --- Show-level required tags ---
         SubElement(channel, "title").text = self.title
-        SubElement(channel, "link").text = self.base_url + "/"
+        SubElement(channel, "link").text = self._protect_url(
+            self.base_url + "/"
+        )
         SubElement(channel, "description").text = self.description
         SubElement(channel, "language").text = self.language
 
@@ -368,7 +386,10 @@ class PodcastFeed:
         if filename:
             enclosure = SubElement(item, "enclosure")
             enclosure.set(
-                "url", f"{self.base_url}/episodes/{filename}"
+                "url",
+                self._protect_url(
+                    f"{self.base_url}/episodes/{filename}"
+                ),
             )
             enclosure.set("type", "audio/x-m4a")
             enclosure.set("length", str(ep.get("file_size", 0)))
@@ -419,7 +440,9 @@ class PodcastFeed:
         if filename:
             SubElement(
                 item, "link"
-            ).text = f"{self.base_url}/episodes/{filename}"
+            ).text = self._protect_url(
+                f"{self.base_url}/episodes/{filename}"
+            )
 
         # --- Episode optional tags ---
         SubElement(

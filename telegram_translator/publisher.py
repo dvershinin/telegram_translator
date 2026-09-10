@@ -13,6 +13,7 @@ from pathlib import Path
 from telegram_translator.audio_encoder import encode_m4a
 from telegram_translator.content_store import ContentStore
 from telegram_translator.feed_generator import PodcastFeed, _markdown_to_html
+from telegram_translator.private_feed import read_private_feed_token
 from telegram_translator.show_notes import (
     parse_show_notes,
     render_body,
@@ -175,6 +176,12 @@ class PodcastPublisher:
                 "Add a 'publish:' section to the podcast config."
             )
 
+        private_token = None
+        if publish_cfg.get("private_token_file"):
+            private_token = read_private_feed_token(
+                publish_cfg["private_token_file"]
+            )
+
         digest = self.store.get_digest(date, podcast_name)
         if not digest or not digest.audio_path:
             raise RuntimeError(
@@ -201,7 +208,12 @@ class PodcastPublisher:
             )
         else:
             m4a_path = await self._publish_static(
-                podcast_name, date, digest, wav_path, publish_cfg
+                podcast_name,
+                date,
+                digest,
+                wav_path,
+                publish_cfg,
+                private_token,
             )
 
         # Mark selected content items as used
@@ -227,6 +239,7 @@ class PodcastPublisher:
         digest,
         wav_path: Path,
         publish_cfg: dict,
+        private_token: str | None,
     ) -> str:
         """Publish to a static destination (or legacy per-podcast config).
 
@@ -236,6 +249,7 @@ class PodcastPublisher:
             digest: Current digest record.
             wav_path: Source WAV file.
             publish_cfg: Resolved publish config dict.
+            private_token: Validated token for a private feed, if configured.
 
         Returns:
             Path to the generated M4A file.
@@ -287,7 +301,9 @@ class PodcastPublisher:
         )
 
         # Rebuild RSS feed + per-podcast HTML index
-        self.rebuild_feed(podcast_name, publish_cfg)
+        self.rebuild_feed(
+            podcast_name, publish_cfg, private_token=private_token
+        )
 
         # Run per-podcast sync command only for LEGACY podcasts (no
         # destination). Destination-scoped podcasts defer the sync to the
@@ -626,17 +642,25 @@ class PodcastPublisher:
         self,
         podcast_name: str,
         publish_cfg: dict | None = None,
+        *,
+        private_token: str | None = None,
     ) -> Path:
         """Rebuild the RSS feed from all published episodes.
 
         Args:
             podcast_name: Podcast identifier.
             publish_cfg: Publish config dict. Uses self.config if None.
+            private_token: Already-loaded private token. When omitted for a
+                private destination, it is loaded from ``private_token_file``.
 
         Returns:
             Path to the generated feed.xml.
         """
         publish_cfg = publish_cfg or self.config.get("publish", {})
+        if publish_cfg.get("private_token_file") and private_token is None:
+            private_token = read_private_feed_token(
+                publish_cfg["private_token_file"]
+            )
         base_url = publish_cfg.get("base_url", "")
         publish_dir = Path(
             publish_cfg.get(
@@ -660,6 +684,7 @@ class PodcastPublisher:
             copyright_text=publish_cfg.get("copyright", ""),
             owner_name=publish_cfg.get("owner_name", ""),
             owner_email=publish_cfg.get("owner_email", ""),
+            private_token=private_token,
         )
 
         # Query all published episodes
@@ -698,9 +723,18 @@ class PodcastPublisher:
         feed.generate(episodes, feed_path)
 
         # Build HTML index page
-        self._build_index_html(
-            podcast_name, episodes, publish_dir, publish_cfg,
-        )
+        if not publish_cfg.get("private_token_file"):
+            self._build_index_html(
+                podcast_name, episodes, publish_dir, publish_cfg,
+            )
+        else:
+            stale_index = publish_dir / "index.html"
+            if stale_index.exists():
+                stale_index.unlink()
+                logger.info(
+                    "Removed stale private index page for '%s'",
+                    podcast_name,
+                )
 
         return feed_path
 
@@ -859,6 +893,19 @@ class PodcastPublisher:
             Path to the generated index.html, or None if skipped.
         """
         if destination_cfg.get("type") != "static":
+            return None
+        if destination_cfg.get("private_token_file"):
+            stale_index = Path(destination_cfg["publish_dir"]) / "index.html"
+            if stale_index.exists():
+                stale_index.unlink()
+                logger.info(
+                    "Removed stale private site index for '%s'",
+                    destination_name,
+                )
+            logger.info(
+                "Skipping public site index for private destination '%s'",
+                destination_name,
+            )
             return None
 
         publish_dir = Path(destination_cfg["publish_dir"])

@@ -48,6 +48,7 @@ The `digests` table is keyed by `(date, podcast_name)`.
 telegram-translator start                              # Run listener
 telegram-translator digest run [--podcast NAME]        # Full pipeline
 telegram-translator digest collect                     # Fetch sources only
+telegram-translator digest ingest --podcast NAME --date YYYY-MM-DD < script.txt
 telegram-translator digest summarize --podcast NAME    # Summarize only
 telegram-translator digest podcast --podcast NAME      # Generate audio only
 telegram-translator digest publish --podcast NAME      # Encode M4A + build feed + deploy

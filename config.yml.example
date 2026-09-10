@@ -128,6 +128,16 @@ destinations:
     site_description: "Daily briefings on tech, geopolitics, and more."
     copyright: "\u00a9 2026 GetPageSpeed LLC"
 
+  # Private static destination. The token value lives only in the absolute,
+  # owner-local 0600 file below; its parent directory must be owner-only 0700.
+  # A private destination must host exactly one podcast with slug: "".
+  # morning_brief_private:
+  #   type: static
+  #   base_url: "https://podcasts.example.com/morning-brief"
+  #   publish_dir: "./publish/morning-brief-private"
+  #   private_token_file: "/Users/you/.config/telegram_translator/private/morning-brief.token"
+  #   sync_command: "rsync -az ./publish/morning-brief-private/ host:/srv/private-podcast/"
+
   # Example astro_collection destination — integrates with an Astro site.
   # vaske:
   #   type: astro_collection
@@ -149,6 +159,25 @@ destinations:
 
 # Named podcasts — each with its own identity, sources, voice, and prompts
 podcasts:
+  # Exact externally authored script. Create this only together with the
+  # private destination example above.
+  # morning_brief:
+  #   destination: morning_brief_private
+  #   slug: ""
+  #   input_mode: external_script
+  #   title: "Morning brief"
+  #   host_name: "Host"
+  #   sources: []
+  #   voice_profile: "default"
+  #   language: "en"
+  #   output_dir: "./podcasts/morning_brief"
+  #   publish:
+  #     show_artwork: "./podcasts/morning_brief/assets/artwork.jpg"
+  #     show_description: "Private daily briefing"
+  #     show_category: "News"
+  #     show_subcategory: "Daily News"
+  #     explicit: false
+
   daily_briefing:
     destination: getpagespeed                  # references destinations.<name> above
     # slug: "daily-briefing"                   # optional URL path override; defaults to podcast key

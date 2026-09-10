@@ -50,6 +50,10 @@ class Digest:
     id: Optional[int] = None
 
 
+class DigestIngestConflictError(RuntimeError):
+    """Report a conflicting external script for an existing daily digest."""
+
+
 class ContentStore:
     """SQLite-based content index for the digest pipeline."""
 
@@ -518,6 +522,97 @@ class ContentStore:
                 "Failed to create digest for %s/%s",
                 date,
                 podcast_name,
+                exc_info=True,
+            )
+            raise
+
+    def ingest_external_script(
+        self,
+        date: str,
+        podcast_name: str,
+        script: str,
+    ) -> tuple[Digest, bool]:
+        """Atomically store one externally authored daily podcast script.
+
+        Args:
+            date: Episode date in YYYY-MM-DD format.
+            podcast_name: Podcast identifier.
+            script: Exact externally authored script text.
+
+        Returns:
+            A tuple containing the digest and whether this call inserted or
+            populated it. An exact retry returns ``False``.
+
+        Raises:
+            DigestIngestConflictError: If a different script already exists
+                for the same podcast and date.
+        """
+        try:
+            with sqlite3.connect(self.db_path, timeout=30) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT * FROM digests "
+                    "WHERE date = ? AND podcast_name = ?",
+                    (date, podcast_name),
+                ).fetchone()
+
+                if row is not None and (row["podcast_script"] or ""):
+                    if (
+                        row["podcast_script"] == script
+                        and (row["executive_summary"] or "") == script
+                    ):
+                        conn.commit()
+                        return self._row_to_digest(row), False
+                    raise DigestIngestConflictError(
+                        "A different script already exists for this "
+                        "podcast and date"
+                    )
+
+                if row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO digests
+                            (date, podcast_name, executive_summary,
+                             podcast_script, status, error_message)
+                        VALUES (?, ?, ?, ?, 'summarized', '')
+                        """,
+                        (date, podcast_name, script, script),
+                    )
+                else:
+                    if row["published_at"]:
+                        raise DigestIngestConflictError(
+                            "Published digest metadata already exists for "
+                            "this podcast and date"
+                        )
+                    conn.execute(
+                        """
+                        UPDATE digests
+                        SET source_summaries = NULL,
+                            executive_summary = ?, podcast_script = ?,
+                            show_notes = '', audio_path = '', m4a_path = '',
+                            duration_seconds = 0, published_at = NULL,
+                            status = 'summarized', error_message = '',
+                            completed_at = NULL, selected_item_ids = ''
+                        WHERE date = ? AND podcast_name = ?
+                        """,
+                        (script, script, date, podcast_name),
+                    )
+
+                stored = conn.execute(
+                    "SELECT * FROM digests "
+                    "WHERE date = ? AND podcast_name = ?",
+                    (date, podcast_name),
+                ).fetchone()
+                conn.commit()
+                return self._row_to_digest(stored), True
+        except DigestIngestConflictError:
+            raise
+        except Exception:
+            logger.error(
+                "Failed to ingest external script for %s/%s",
+                podcast_name,
+                date,
                 exc_info=True,
             )
             raise

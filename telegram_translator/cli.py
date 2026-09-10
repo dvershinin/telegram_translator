@@ -324,6 +324,63 @@ def digest():
     pass
 
 
+@digest.command(name="ingest")
+@click.option("--podcast", "podcast_name", required=True, help="Podcast name")
+@click.option("--date", required=True, help="Episode date (YYYY-MM-DD)")
+def digest_ingest(podcast_name, date):
+    """Ingest an exact externally authored podcast script from stdin."""
+    from datetime import datetime as dt
+
+    from telegram_translator.content_store import (
+        ContentStore,
+        DigestIngestConflictError,
+    )
+
+    try:
+        parsed_date = dt.strptime(date, "%Y-%m-%d")
+    except ValueError as error:
+        raise click.ClickException(
+            "Date must use YYYY-MM-DD format"
+        ) from error
+    if parsed_date.strftime("%Y-%m-%d") != date:
+        raise click.ClickException("Date must use YYYY-MM-DD format")
+
+    config_mgr = ConfigManager()
+    podcasts = config_mgr.resolve_podcast_configs()
+    if podcast_name not in podcasts:
+        raise click.ClickException(
+            f"Unknown podcast '{podcast_name}'. "
+            f"Available: {list(podcasts.keys())}"
+        )
+    if podcasts[podcast_name].get("input_mode") != "external_script":
+        raise click.ClickException(
+            f"Podcast '{podcast_name}' does not accept external scripts"
+        )
+
+    raw = click.get_binary_stream("stdin").read(65537)
+    if len(raw) > 65536:
+        raise click.ClickException("Script exceeds the 64 KiB input limit")
+    try:
+        script = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise click.ClickException("Script must be valid UTF-8") from error
+    if not script.strip():
+        raise click.ClickException("Script must not be empty")
+
+    db_path = config_mgr.get_database_path("content_store.db")
+    store = ContentStore(db_path)
+    try:
+        digest_record, inserted = store.ingest_external_script(
+            date, podcast_name, script
+        )
+    except DigestIngestConflictError as error:
+        raise click.ClickException(str(error)) from error
+
+    outcome = "Ingested" if inserted else "Already ingested"
+    click.echo(f"{outcome}: {digest_record.podcast_name}/{digest_record.date}")
+    click.echo(f"Digest metadata: {db_path}")
+
+
 @digest.command(name="run")
 @click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
 @click.option("--podcast", "podcast_name", default=None, help="Podcast name (runs all if omitted)")
@@ -628,7 +685,9 @@ def digest_publish(date, podcast_name):
             if ok:
                 click.echo(f"Sync complete: {dest_name}")
             else:
-                click.echo(f"Sync failed: {dest_name}", err=True)
+                raise click.ClickException(
+                    f"Sync failed: {dest_name}"
+                )
 
     asyncio.run(_run())
 

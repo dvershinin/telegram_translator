@@ -51,6 +51,29 @@ class DigestPipeline:
             self.podcast_configs = all_podcasts
             self.sources_config = config.get("sources", {})
 
+    def _automated_podcast_configs(self) -> dict:
+        """Return podcasts owned by the collection and summarization pipeline."""
+        return {
+            name: cfg
+            for name, cfg in self.podcast_configs.items()
+            if cfg.get("input_mode") != "external_script"
+        }
+
+    def _reject_targeted_external_script(self, operation: str) -> None:
+        """Reject news-pipeline operations for a targeted external podcast.
+
+        Args:
+            operation: Human-readable operation name.
+
+        Raises:
+            ValueError: If the only selected podcast uses external scripts.
+        """
+        if self.podcast_configs and not self._automated_podcast_configs():
+            raise ValueError(
+                f"Cannot {operation} an external-script podcast; use "
+                "'digest ingest'"
+            )
+
     def _today(self) -> str:
         """Return today's date as YYYY-MM-DD in local time."""
         return datetime.now().strftime("%Y-%m-%d")
@@ -77,6 +100,7 @@ class DigestPipeline:
         Returns:
             Number of new items stored.
         """
+        self._reject_targeted_external_script("collect")
         date = date or self._today()
         since = self._since(date)
         total_new = 0
@@ -246,11 +270,12 @@ class DigestPipeline:
             Dict mapping podcast name to result dict with keys:
             source_summaries, executive_summary, podcast_script.
         """
+        self._reject_targeted_external_script("summarize")
         date = date or self._today()
         since = self._since(date)
         results = {}
 
-        for podcast_name, pcfg in self.podcast_configs.items():
+        for podcast_name, pcfg in self._automated_podcast_configs().items():
             logger.info("Summarizing for podcast: %s", podcast_name)
 
             self.store.create_digest(date, podcast_name)
@@ -449,12 +474,17 @@ class DigestPipeline:
         self,
         date: str | None = None,
         no_cache: bool = False,
+        *,
+        include_external_script: bool = True,
     ) -> dict:
         """Generate podcast audio for each podcast.
 
         Args:
             date: Target date (YYYY-MM-DD). Defaults to today.
             no_cache: If True, bypass the TTS segment cache.
+            include_external_script: Whether externally ingested podcasts may
+                be synthesized. The explicit podcast command leaves this on;
+                the generic full pipeline turns it off.
 
         Returns:
             Dict mapping podcast name to audio file path string.
@@ -464,7 +494,12 @@ class DigestPipeline:
 
         tts_cache_dir = Path(".cache/tts")
 
-        for podcast_name, pcfg in self.podcast_configs.items():
+        podcast_configs = (
+            self.podcast_configs
+            if include_external_script
+            else self._automated_podcast_configs()
+        )
+        for podcast_name, pcfg in podcast_configs.items():
             digest = self.store.get_digest(date, podcast_name)
 
             if not digest or not digest.podcast_script:
@@ -531,6 +566,7 @@ class DigestPipeline:
             Dict mapping podcast name to result dict.
         """
         date = date or self._today()
+        self._reject_targeted_external_script("run the news pipeline for")
         logger.info("Starting full digest pipeline for %s", date)
 
         new_items = await self.collect(date)
@@ -538,20 +574,21 @@ class DigestPipeline:
 
         results = await self.summarize(date, no_cache=no_cache)
 
-        for podcast_name in self.podcast_configs:
-            try:
-                audio_path = await self.podcast(date, no_cache=no_cache)
-                if podcast_name in audio_path:
-                    results.setdefault(podcast_name, {})
-                    results[podcast_name]["audio_path"] = audio_path[
-                        podcast_name
-                    ]
-            except RuntimeError:
-                logger.warning(
-                    "Podcast generation skipped for %s (Voicebox unavailable)",
-                    podcast_name,
-                    exc_info=True,
-                )
+        try:
+            audio_paths = await self.podcast(
+                date,
+                no_cache=no_cache,
+                include_external_script=False,
+            )
+            for podcast_name, audio_path in audio_paths.items():
+                results.setdefault(podcast_name, {})
+                results[podcast_name]["audio_path"] = audio_path
+        except RuntimeError:
+            logger.warning(
+                "Podcast generation skipped (Voicebox unavailable)",
+                exc_info=True,
+            )
+            for podcast_name in self._automated_podcast_configs():
                 results.setdefault(podcast_name, {})
                 results[podcast_name]["audio_path"] = ""
 
