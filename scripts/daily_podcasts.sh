@@ -44,12 +44,16 @@ alert_failures() {
         echo "podcast failure alert unavailable: $MCP_DEV is not executable" >&2
         return 1
     fi
+    # cooldown_seconds: 3600 is the MCP's maximum. The previous 82800 was
+    # rejected outright ("must be from 30 to 3600"), so every nightly failure
+    # alert since this was added silently never fired. Same-day re-alerts are
+    # already suppressed by the dated dedupe_key.
     "$MCP_DEV" call system human_action_alert \
         --arg "title=Daily podcast pipeline failed" \
         --arg "body=The scheduled podcast run for $run_date failed for: $PIPELINE_FAILURES. Inspect $LOG_DIR/daily_podcasts_$run_date.log, then re-run that date after fixing the cause." \
         --arg "urgency=attention" \
         --arg "dedupe_key=telegram-translator-daily-podcasts-$run_date" \
-        --arg "cooldown_seconds=82800" \
+        --arg "cooldown_seconds=3600" \
         --arg "working_directory=$PROJECT_DIR"
 }
 

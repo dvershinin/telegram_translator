@@ -52,6 +52,9 @@ def test_scheduled_runner_is_safe_and_alerts_on_failure() -> None:
     assert '"$SUCCESS_FILE"' in SCRIPT
     assert "human_action_alert" in SCRIPT
     assert "telegram-translator-daily-podcasts-$run_date" in SCRIPT
+    # system-mcp rejects cooldown_seconds outside 30..3600, and a rejected
+    # alert is indistinguishable from no failure at all.
+    assert '--arg "cooldown_seconds=3600"' in SCRIPT
     assert "working_directory=$PROJECT_DIR" in SCRIPT
     assert 'if [ -n "$PIPELINE_FAILURES" ]' in SCRIPT
     assert 'alert_failures "$run_date" || true' in SCRIPT
