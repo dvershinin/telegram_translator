@@ -199,7 +199,9 @@ main() {
     run_podcast crosswire "$run_date"
     run_podcast the_stack "$run_date"
     run_podcast scalable_stories "$run_date"
-    run_podcast vaske_daily "$run_date"
+    # DISABLED 2026-09-14: vaske_daily pushed the run into the afternoon.
+    # Re-enable by uncommenting; nothing else is needed.
+    # run_podcast vaske_daily "$run_date"
 
     if [ -n "$PIPELINE_FAILURES" ]; then
         alert_failures "$run_date" || true

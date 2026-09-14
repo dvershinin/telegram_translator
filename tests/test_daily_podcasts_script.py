@@ -16,11 +16,23 @@ CRON_INSTALLER = (
 )
 
 
-def test_scalable_stories_runs_before_russian_podcast() -> None:
-    """The English WordPress show should run before the Russian pipeline."""
-    assert SCRIPT.index("run_podcast scalable_stories") < SCRIPT.index(
-        "run_podcast vaske_daily"
-    )
+def test_vaske_daily_stays_disabled() -> None:
+    """vaske_daily is off: it pushed the 04:00 run into the afternoon.
+
+    The call must stay commented out, not merely ordered last, so an
+    uncomment is a deliberate edit rather than a silent re-enable.
+    """
+    active = [
+        line.strip()
+        for line in SCRIPT.splitlines()
+        if line.strip().startswith("run_podcast ")
+    ]
+    assert active == [
+        'run_podcast crosswire "$run_date"',
+        'run_podcast the_stack "$run_date"',
+        'run_podcast scalable_stories "$run_date"',
+    ]
+    assert '# run_podcast vaske_daily "$run_date"' in SCRIPT
 
 
 def test_wordpress_credentials_are_scoped_to_scalable_stories() -> None:
@@ -330,8 +342,13 @@ main
     assert calls[0] == "cli digest collect --date 2026-08-25"
     assert all("2026-08-25" in call for call in calls)
     assert not any("2026-08-26" in call for call in calls)
-    assert any("digest publish" in call and "vaske_daily" in call for call in calls)
+    # the_stack is the last show that runs regardless of credentials, so it
+    # proves the pinned date survives to a publish stage in both parametrizations.
+    assert any("digest publish" in call and "the_stack" in call for call in calls)
     if credential_available:
+        assert any(
+            "digest publish" in call and "scalable_stories" in call for call in calls
+        )
         assert result.returncode == 0
         assert (state_dir / "success").read_text(encoding="utf-8") == "2026-08-25\n"
     else:
