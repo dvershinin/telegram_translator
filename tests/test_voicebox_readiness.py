@@ -94,7 +94,11 @@ def _patch_sleep(monkeypatch):
 
 
 class _GenerationClient:
-    """Capture one generation payload and return a small WAV placeholder."""
+    """Capture one generation payload and return a small WAV placeholder.
+
+    The ``/transcribe`` verification call (``files=`` present) echoes the
+    text these tests generate ("Hello.") so verification passes.
+    """
 
     def __init__(self):
         self.payload = None
@@ -105,7 +109,9 @@ class _GenerationClient:
     async def __aexit__(self, *exc):
         return False
 
-    async def post(self, url, json):
+    async def post(self, url, json=None, files=None, data=None):
+        if files is not None:
+            return _ok_response({"text": "Hello."})
         self.payload = json
         return _ok_response({"id": "generation-1", "duration": 1.0})
 
@@ -244,7 +250,10 @@ class _FlakyGenerationClient:
     async def __aexit__(self, *exc):
         return False
 
-    async def post(self, url, json):
+    async def post(self, url, json=None, files=None, data=None):
+        if files is not None:
+            # Verification transcribe call — echo the generated text.
+            return _ok_response({"text": "Hello."})
         self.post_calls += 1
         if self.post_calls <= self._fail_times:
             raise self._error

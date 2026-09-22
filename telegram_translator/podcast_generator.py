@@ -1,6 +1,7 @@
 """Voicebox-based podcast audio generation."""
 
 import asyncio
+import difflib
 import hashlib
 import json
 import logging
@@ -44,6 +45,36 @@ _TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 def _is_transient_status(status: int) -> bool:
     """True for HTTP statuses that a retry could plausibly clear."""
     return status in _TRANSIENT_HTTP_STATUSES
+
+
+def _normalize_spoken_tokens(text: str) -> list[str]:
+    """Reduce text to comparable spoken words.
+
+    Lowercases and strips punctuation so that formatting differences
+    between the script and an STT transcript ("$112,485" vs "112 485")
+    do not register as word errors. Digits are kept: they are exactly
+    what a garbled generation mangles first.
+    """
+    return re.sub(r"[^\w\s]|_", " ", text.lower()).split()
+
+
+def _word_error_rate(reference: list[str], hypothesis: list[str]) -> float:
+    """Word error rate of ``hypothesis`` against ``reference``.
+
+    Substitutions, deletions, and insertions all count, so both dropped
+    words and hallucinated extra speech raise the rate (it can exceed
+    1.0 when the hypothesis rambles far past the reference).
+    """
+    if not reference:
+        return 0.0 if not hypothesis else 1.0
+    matcher = difflib.SequenceMatcher(
+        a=reference, b=hypothesis, autojunk=False
+    )
+    errors = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != "equal":
+            errors += max(i2 - i1, j2 - j1)
+    return errors / len(reference)
 
 
 def _glue_ru_clitics(text: str) -> str:
@@ -380,6 +411,17 @@ class PodcastGenerator:
         self.segment_retry_base_delay = float(
             config.get("segment_retry_base_delay_seconds", 3.0)
         )
+
+        # Publish gate, 2026-09-22: a Voicebox regression rendered a whole
+        # episode as garbled non-speech while /generate reported success for
+        # every segment, and the episode shipped to the public feed. Success
+        # from TTS proves nothing about the audio; only a round-trip through
+        # STT does. Each segment is transcribed and compared with its script
+        # text; a mismatch is retried like a transient failure and, if it
+        # persists, fails the episode rather than publishing it. Fail-closed:
+        # transcription being unavailable also blocks publishing.
+        self.tts_verify = bool(config.get("tts_verify", True))
+        self.tts_verify_max_wer = float(config.get("tts_verify_max_wer", 0.5))
 
         self._profile_id: Optional[str] = None
 
@@ -735,6 +777,62 @@ class PodcastGenerator:
         h = hashlib.sha256(payload.encode()).hexdigest()
         return self.tts_cache_dir / f"{h}.wav"
 
+    async def _segment_verification_error(
+        self,
+        client: httpx.AsyncClient,
+        text: str,
+        wav_path: Path,
+    ) -> str | None:
+        """Prove the generated audio actually says the segment text.
+
+        Transcribes the WAV through Voicebox ``/transcribe`` and compares
+        the spoken words with the script text at word level. Fail-closed:
+        an unavailable or failing transcription counts as a verification
+        failure, because unverifiable audio must not be published.
+
+        Args:
+            client: Open HTTP client for the Voicebox server.
+            text: The exact text that was sent to TTS.
+            wav_path: The audio that came back.
+
+        Returns:
+            None when the audio is verified, otherwise a human-readable
+            description of the mismatch.
+        """
+        reference = _normalize_spoken_tokens(text)
+        if not reference:
+            return None
+
+        try:
+            with open(wav_path, "rb") as audio_file:
+                response = await client.post(
+                    f"{self.voicebox_url}/transcribe",
+                    files={
+                        "file": (wav_path.name, audio_file, "audio/wav"),
+                    },
+                    data={"language": self.language},
+                )
+            response.raise_for_status()
+            transcript = response.json().get("text", "")
+        except (httpx.HTTPError, ValueError) as e:
+            return f"transcription unavailable ({type(e).__name__}: {e})"
+
+        hypothesis = _normalize_spoken_tokens(transcript)
+        if not hypothesis:
+            return (
+                f"no speech recognized in generated audio "
+                f"({len(reference)} words expected)"
+            )
+
+        wer = _word_error_rate(reference, hypothesis)
+        if wer > self.tts_verify_max_wer:
+            return (
+                f"word error rate {wer:.2f} exceeds "
+                f"{self.tts_verify_max_wer:.2f}; transcript starts: "
+                f"{transcript[:160]!r}"
+            )
+        return None
+
     async def generate_segment(
         self,
         text: str,
@@ -781,9 +879,10 @@ class PodcastGenerator:
             payload["instruct"] = self.voice_instruct
 
         # Bounded retry over TRANSIENT failures only (timeout, connection
-        # drop, 5xx, 429). A deterministic 4xx (bad text/profile) is not
-        # retried — retrying it just wastes the budget and delays the fail.
-        last_error: httpx.HTTPError | None = None
+        # drop, 5xx, 429) plus failed post-generation verification. A
+        # deterministic 4xx (bad text/profile) is not retried — retrying it
+        # just wastes the budget and delays the fail.
+        last_error: Exception | None = None
         for attempt in range(1, self.segment_max_attempts + 1):
             try:
                 async with httpx.AsyncClient(timeout=900) as client:
@@ -816,12 +915,29 @@ class PodcastGenerator:
                         time.monotonic() - started,
                     )
 
-                    # Save to TTS cache
-                    if cached:
-                        cached.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(output_path, cached)
+                    mismatch = None
+                    if self.tts_verify:
+                        mismatch = await self._segment_verification_error(
+                            client, text, output_path
+                        )
+                    if mismatch is None:
+                        # Only verified audio may enter the TTS cache —
+                        # cache hits skip verification on later runs.
+                        if cached:
+                            cached.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(output_path, cached)
 
-                    return output_path
+                        return output_path
+
+                    last_error = RuntimeError(mismatch)
+                    logger.warning(
+                        "TTS verification failed for %s (attempt %d/%d); "
+                        "regenerating: %s",
+                        label,
+                        attempt,
+                        self.segment_max_attempts,
+                        mismatch,
+                    )
 
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code if e.response is not None else 0
