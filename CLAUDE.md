@@ -116,6 +116,53 @@ Each destination-scoped podcast may set `slug:` to override the URL path (e.g. p
 
 `base_url` is normalized at config load — trailing slashes are stripped so URL composition never produces double slashes.
 
+### TTS publish gate (segment verification)
+
+Every generated segment is transcribed back through Voicebox `/transcribe` and
+word-compared with its script before it may be cached or assembled
+(`podcast_generator._segment_verification_error`). Added 2026-09-22 after a
+Voicebox ICL regression published a full episode of garbled non-speech while
+`/generate` returned success for every segment. Mismatch → regenerate within
+`segment_max_attempts`; persistent mismatch → the episode fails instead of
+publishing. **Fail-closed**: transcription being unavailable also blocks
+publishing (the nightly alert fires; a news episode lapsing beats shipping
+garbage). Insertions count toward WER, so hallucinated rambling and lead-ins
+fail too. Knobs: `tts_verify` (default on), `tts_verify_max_wer` (default
+0.5 — loose enough to absorb number-formatting drift between script digits and
+Whisper output). Only verified audio enters `.cache/tts/`, because cache hits
+skip verification on later runs.
+
+### TTS cache as a gold corpus
+
+`.cache/tts/` files are keyed `sha256(f"{prepared_text}:{voice_profile_name}"
+[+ f":instruct:{voice_instruct}"]) + ".wav"` where `prepared_text` is the
+`_prepare_tts_text()` output. Because `digests.podcast_script` is retained,
+past episodes' exact segment texts can be re-derived (`parse_structured_sections`
+/ `split_script_by_topics`) and their hashes looked up — giving aired,
+known-good audio for the same text. This is the cheapest differential test
+when upgrading anything in the TTS stack: regenerate the same segments and
+A/B against the cached originals (used 2026-09-22 to catch mlx-audio 0.5.4
+identity drift that WER metrics could not hear — keep a listening step).
+
+### Pulling a published episode (unpublish)
+
+No CLI for this yet — manual procedure (executed 2026-09-22 for
+crosswire + morning_brief):
+1. Back up the M4A, then `UPDATE digests SET published_at=NULL, m4a_path=NULL`
+   for the row and delete the local M4A.
+2. `digest feed --podcast NAME` rebuilds feed.xml + indexes without the row.
+3. Run the destination's rsync `sync_command` manually — **it has no
+   `--delete`**, so also `ssh podcasts@web.getpagespeed.com rm …` the episode
+   file server-side.
+4. podcasts.getpagespeed.com sits behind Cloudflare with a cache that ignores
+   query strings — origin freshness proves nothing about the edge. Purge the
+   exact URLs (feed.xml, index pages, the M4A) via the Cloudflare API, zone
+   `getpagespeed.com`.
+5. For morning_brief also confirm the tgp spool state
+   (`~/Library/Application Support/tgp/morning_brief_podcast/<date>.state.json`)
+   is `completed`, or the 5-minute publish retry will re-encode and re-push
+   the pulled episode from the still-present WAV.
+
 ### Root site index
 
 For static destinations hosting multiple podcasts (or any subpath podcasts), `digest publish` and `digest feed` automatically regenerate `{destination.publish_dir}/index.html` — a dark-theme landing page listing every podcast on the host with artwork, title, description, latest-episode date, and links to the per-podcast page and RSS feed. `digest site [--destination NAME]` rebuilds it without touching anything else.
