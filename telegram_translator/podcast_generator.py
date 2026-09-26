@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 # Example: ``какая-то`` → ``какаята`` (correct clitic prosody).
 # Leaves non-clitic hyphen cases alone: ``Ростов-на-Дону``,
 # ``по-русски``, ``2026-04-11``, ``что-что``, ``AI-фигня``.
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+
 _RU_CLITIC_RE = re.compile(
     r"([а-яёА-ЯЁ])-(то|нибудь|либо|ка|таки)\b"
 )
@@ -110,6 +112,28 @@ def _prepare_tts_text(text: str, language: str) -> str:
     if language == "en":
         return _NGINX_RE.sub("Engine X", text)
     return _glue_ru_clitics(text)
+
+
+def _verification_language(text: str, language: str) -> str | None:
+    """Pick the Whisper language hint for verifying one segment.
+
+    Whisper forced into the wrong language translates instead of
+    transcribing, so a Russian passage in an English show comes back as
+    English and fails the word-level check on perfectly good audio (the
+    mixed-language morning brief, 2026-09-25). Segments containing
+    Cyrillic in a non-Russian show are therefore left to Whisper's own
+    language detection, which transcribes code-switched speech faithfully.
+
+    Args:
+        text: Segment text exactly as sent to TTS.
+        language: The podcast's configured ISO language code.
+
+    Returns:
+        The configured code, or None to let Whisper auto-detect.
+    """
+    if language != "ru" and _CYRILLIC_RE.search(text):
+        return None
+    return language
 
 
 def split_script(text: str, max_chars: int = 500) -> list[str]:
@@ -803,6 +827,8 @@ class PodcastGenerator:
         if not reference:
             return None
 
+        language = _verification_language(text, self.language)
+        form = {"language": language} if language else {}
         try:
             with open(wav_path, "rb") as audio_file:
                 response = await client.post(
@@ -810,7 +836,7 @@ class PodcastGenerator:
                     files={
                         "file": (wav_path.name, audio_file, "audio/wav"),
                     },
-                    data={"language": self.language},
+                    data=form,
                 )
             response.raise_for_status()
             transcript = response.json().get("text", "")

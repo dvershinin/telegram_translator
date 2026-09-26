@@ -16,6 +16,7 @@ from telegram_translator import podcast_generator
 from telegram_translator.podcast_generator import (
     PodcastGenerator,
     _normalize_spoken_tokens,
+    _verification_language,
     _word_error_rate,
 )
 
@@ -65,6 +66,7 @@ class _ScriptedClient:
         self._transcripts = list(transcripts)
         self.generation_calls = 0
         self.transcribe_calls = 0
+        self.transcribe_languages = []
 
     async def __aenter__(self):
         return self
@@ -75,11 +77,16 @@ class _ScriptedClient:
     async def post(self, url, json=None, files=None, data=None):
         if files is not None:
             self.transcribe_calls += 1
+            self.transcribe_languages.append(
+                (data or {}).get("language", "<omitted>")
+            )
             if not self._transcripts:
                 pytest.fail("unexpected extra transcribe call")
             item = self._transcripts.pop(0)
             if isinstance(item, Exception):
                 raise item
+            if callable(item):
+                item = item((data or {}).get("language", "<omitted>"))
             return _ok_response({"text": item})
         self.generation_calls += 1
         return _ok_response({"id": f"gen-{self.generation_calls}", "duration": 1.0})
@@ -130,6 +137,7 @@ async def test_verified_segment_passes_and_is_cached(monkeypatch, tmp_path):
 
     assert out.exists()
     assert client.transcribe_calls == 1
+    assert client.transcribe_languages == ["en"]
     assert generator._tts_cache_path(TEXT).exists()
 
 
@@ -199,3 +207,73 @@ async def test_verification_can_be_disabled(monkeypatch, tmp_path):
 
     assert out.exists()
     assert client.transcribe_calls == 0
+
+
+# ------------------------------------ mixed-language segments (2026-09-25)
+#
+# The morning brief mixes Russian and English by design. Its podcast
+# language is "en", and the check forced that hint onto Whisper, which
+# then TRANSLATED the Russian half instead of transcribing it: WER 0.71
+# on perfectly good audio, four regenerations per run, and TGP re-ran the
+# stuck date every ten minutes for two days. Fixtures below are the real
+# 25.09 segment 5 and Whisper's real transcripts of its audio.
+
+MIXED_SEGMENT = (
+    "В остальном: Meta представила VR-шлем весом 100 граммов примерно за "
+    "1,300 долларов и очки Ray-Ban без камеры за 349, явно чтобы снять "
+    "backlash по поводу скрытой записи. Microsoft обновила Surface на новом "
+    "Snapdragon X2 Plus, и базовые 8 гигабайт памяти ушли в прошлое, теперь "
+    "минимум 16. Personal and health. You're in Pakulonan Barat, local time "
+    "just past 8:27, 30 degrees, and your location fix is about 16 hours "
+    "old. The health flag today is sleep: one hour recorded, which is poor."
+)
+WHISPER_FORCED_EN = (
+    "In the rest, Meta presented a VR helmet weighing 100 grams for about "
+    "$ 1,300 and Ray-Ban glasses without a camera for $ 349, clearly to "
+    "remove the bug only about the hidden recording. Microsoft has updated "
+    "Surface with the new Snapdragon X2 Plus, and the basic 8 GB of memory "
+    "has gone into the past, now at least 16. The temperature is 28.27, 30 "
+    "degrees, and your location fix is about 16 hours old. The health flag "
+    "today is sleep, 1 hour recorded, which is poor."
+)
+WHISPER_FAITHFUL = (
+    "В остальном, Meta представила VR-шлем весом 100 граммов примерно за "
+    "1.300 долларов и очки Ray-Ban без камеры за 349, явно чтобы снять "
+    "баклиш по поводу скрытой записи. Microsoft обновила Surface на новом "
+    "Snapdragon X2 Plus и базовые 8 гигабайт памяти ушли в прошлое, теперь "
+    "минимум 16. Personal and Health, you're in Pakolonen Barat, local time "
+    "just passed 8.27, 30 degrees, and your location fix is about 16 hours "
+    "old. The health flag today is sleep, one hour recorded, which is poor."
+)
+
+
+def _whisper(language):
+    """Real Whisper: forcing English onto Russian speech translates it."""
+    return WHISPER_FORCED_EN if language == "en" else WHISPER_FAITHFUL
+
+
+def test_verification_language_keeps_hint_for_single_language_segments():
+    assert _verification_language(TEXT, "en") == "en"
+    assert _verification_language("Доброе утро, рынок открыт.", "ru") == "ru"
+    # Latin brand names inside a Russian show do not make it mixed.
+    assert _verification_language("Meta выпустила Ray-Ban.", "ru") == "ru"
+
+
+def test_verification_language_auto_detects_cyrillic_in_non_russian_show():
+    assert _verification_language(MIXED_SEGMENT, "en") is None
+
+
+@pytest.mark.asyncio
+async def test_mixed_language_segment_verifies_without_forced_english(
+    monkeypatch, tmp_path
+):
+    client = _ScriptedClient([_whisper] * 3)
+    _patch(monkeypatch, client)
+    generator = _generator(tmp_path, language="en")
+
+    out = await generator.generate_segment(MIXED_SEGMENT, tmp_path / "seg.wav")
+
+    assert out.exists()
+    assert client.generation_calls == 1
+    # The hint is left out entirely (httpx rejects None form values).
+    assert client.transcribe_languages == ["<omitted>"]
