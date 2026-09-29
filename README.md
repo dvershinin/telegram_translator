@@ -458,19 +458,30 @@ telegram_translator/
    pip install -e ".[dev]"
    ```
 
-2. Run code formatting:
+2. Format all Python code with Black, the repository's sole formatter:
    ```bash
-   black src/
+   python -m black .
+   ```
+   Black is pinned to 26.5.1, with an 88-character line length and Python 3.12
+   syntax. Its required version and settings live in `pyproject.toml`. Ruff is
+   used only for linting; do not run `ruff format`. Update the Black dependency
+   and required version together when intentionally upgrading the formatter.
+
+3. Run the same formatting and lint checks as MyCI:
+   ```bash
+   python -m black --check .
+   ruff check .
    ```
 
-3. Run type checking:
+4. Run the hermetic test suite with all `LLM_*` role variables unset:
    ```bash
-   mypy src/
+   bash -c 'for variable in "${!LLM_@}"; do unset "$variable"; done; exec python -m pytest tests/ -q'
    ```
+   MyCI installs the pinned development tools and enforces all three checks.
 
-4. Run tests:
+5. Optional type checking:
    ```bash
-   pytest
+   mypy telegram_translator/
    ```
 
 ### Python Version Compatibility

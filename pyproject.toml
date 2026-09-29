@@ -41,8 +41,8 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
+    "black==26.5.1",
+    "ruff==0.14.14",
     "mypy>=1.0.0",
 ]
 
@@ -53,8 +53,16 @@ telegram-translator = "telegram_translator.cli:cli"
 where = ["."]
 
 [tool.black]
+required-version = '26.5.1'
 line-length = 88
 target-version = ['py312']
+
+[tool.ruff]
+line-length = 88
+target-version = 'py312'
+
+[tool.ruff.lint]
+select = ['E4', 'E7', 'E9', 'F']
 
 [tool.mypy]
 python_version = "3.12"
@@ -66,4 +74,4 @@ disallow_untyped_defs = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
-python_functions = ["test_*"] 
+python_functions = ["test_*"]

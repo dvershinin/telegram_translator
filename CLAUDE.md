@@ -233,7 +233,14 @@ The feed generator (`feed_generator.py`) targets Apple Podcasts spec compliance.
 
 ## Testing
 
+Black 26.5.1 is the sole Python formatter (88 columns, Python 3.12); its exact
+version is pinned and enforced in `pyproject.toml`. Run
+`~/.virtualenvs/telegram_translator/bin/python -m black .` to format. Ruff is
+lint-only; do not use `ruff format`. MyCI enforces formatting, lint, and L1:
+
 ```bash
+~/.virtualenvs/telegram_translator/bin/python -m black --check .
+ruff check .
 bash -c 'for variable in "${!LLM_@}"; do unset "$variable"; done; exec ~/.virtualenvs/telegram_translator/bin/python -m pytest tests/ -q'
 ```
 

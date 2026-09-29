@@ -13,6 +13,12 @@ jobs:
           name: Install dependencies
           command: python -m pip install --disable-pip-version-check --editable '.[dev]'
       - run:
+          name: Check Python formatting
+          command: python -m black --check .
+      - run:
+          name: Lint Python
+          command: python -m ruff check .
+      - run:
           name: Run hermetic test suite
           command: |
             for variable in "${!LLM_@}"; do
