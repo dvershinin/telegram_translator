@@ -228,9 +228,7 @@ class ContentStore:
         ]
         for col_name, col_type in new_columns:
             if col_name not in columns:
-                conn.execute(
-                    f"ALTER TABLE digests ADD COLUMN {col_name} {col_type}"
-                )
+                conn.execute(f"ALTER TABLE digests ADD COLUMN {col_name} {col_type}")
                 logger.info("Added column %s to digests table", col_name)
 
     @staticmethod
@@ -318,9 +316,7 @@ class ContentStore:
                 return inserted
 
         except Exception:
-            logger.error(
-                "Failed to store content from %s", source_name, exc_info=True
-            )
+            logger.error("Failed to store content from %s", source_name, exc_info=True)
             return False
 
     def get_content_since(
@@ -439,12 +435,16 @@ class ContentStore:
                 conn.commit()
                 logger.info(
                     "Marked %d items as used for %s/%s",
-                    len(item_ids), podcast_name, date,
+                    len(item_ids),
+                    podcast_name,
+                    date,
                 )
         except Exception:
             logger.error(
                 "Failed to mark items used for %s/%s",
-                podcast_name, date, exc_info=True,
+                podcast_name,
+                date,
+                exc_info=True,
             )
 
     def get_content_items_by_ids(
@@ -472,15 +472,10 @@ class ContentStore:
                     f"WHERE id IN ({placeholders})",
                     item_ids,
                 ).fetchall()
-            by_id = {
-                int(row["id"]): self._row_to_content_item(row)
-                for row in rows
-            }
+            by_id = {int(row["id"]): self._row_to_content_item(row) for row in rows}
             return [by_id[item_id] for item_id in item_ids if item_id in by_id]
         except Exception:
-            logger.error(
-                "Failed to retrieve content items by ID", exc_info=True
-            )
+            logger.error("Failed to retrieve content items by ID", exc_info=True)
             return []
 
     def create_digest(
@@ -503,15 +498,13 @@ class ContentStore:
                 cursor = conn.cursor()
 
                 cursor.execute(
-                    "INSERT OR IGNORE INTO digests (date, podcast_name) "
-                    "VALUES (?, ?)",
+                    "INSERT OR IGNORE INTO digests (date, podcast_name) VALUES (?, ?)",
                     (date, podcast_name),
                 )
                 conn.commit()
 
                 cursor.execute(
-                    "SELECT * FROM digests "
-                    "WHERE date = ? AND podcast_name = ?",
+                    "SELECT * FROM digests WHERE date = ? AND podcast_name = ?",
                     (date, podcast_name),
                 )
                 row = cursor.fetchone()
@@ -552,8 +545,7 @@ class ContentStore:
                 conn.row_factory = sqlite3.Row
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT * FROM digests "
-                    "WHERE date = ? AND podcast_name = ?",
+                    "SELECT * FROM digests WHERE date = ? AND podcast_name = ?",
                     (date, podcast_name),
                 ).fetchone()
 
@@ -565,8 +557,7 @@ class ContentStore:
                         conn.commit()
                         return self._row_to_digest(row), False
                     raise DigestIngestConflictError(
-                        "A different script already exists for this "
-                        "podcast and date"
+                        "A different script already exists for this podcast and date"
                     )
 
                 if row is None:
@@ -600,8 +591,7 @@ class ContentStore:
                     )
 
                 stored = conn.execute(
-                    "SELECT * FROM digests "
-                    "WHERE date = ? AND podcast_name = ?",
+                    "SELECT * FROM digests WHERE date = ? AND podcast_name = ?",
                     (date, podcast_name),
                 ).fetchone()
                 conn.commit()
@@ -682,8 +672,7 @@ class ContentStore:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT * FROM digests "
-                    "WHERE date = ? AND podcast_name = ?",
+                    "SELECT * FROM digests WHERE date = ? AND podcast_name = ?",
                     (date, podcast_name),
                 )
                 row = cursor.fetchone()
@@ -726,8 +715,7 @@ class ContentStore:
                     )
                 else:
                     cursor.execute(
-                        "SELECT * FROM digests "
-                        "ORDER BY date DESC LIMIT ?",
+                        "SELECT * FROM digests ORDER BY date DESC LIMIT ?",
                         (limit,),
                     )
                 return [self._row_to_digest(row) for row in cursor.fetchall()]
@@ -793,8 +781,7 @@ class ContentStore:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
-                    "SELECT output_text FROM llm_cache "
-                    "WHERE cache_key = ?",
+                    "SELECT output_text FROM llm_cache WHERE cache_key = ?",
                     (cache_key,),
                 )
                 row = cursor.fetchone()
@@ -874,9 +861,7 @@ class ContentStore:
                 )
                 return [(row[0], row[1]) for row in cursor.fetchall()]
         except Exception:
-            logger.error(
-                "Failed to get recent summaries", exc_info=True
-            )
+            logger.error("Failed to get recent summaries", exc_info=True)
             return []
 
     @staticmethod

@@ -6,7 +6,6 @@ import pytest
 
 from telegram_translator.config_manager import ConfigManager
 
-
 # Minimal config skeleton — the tests synthesise a ConfigManager directly
 # so they don't touch the real config.yml or app data directories.
 _BASE_CONFIG = {
@@ -163,9 +162,7 @@ class TestResolveDestinations:
         assert dest["site_description"] == "Desc"
         assert dest["copyright"] == "© 2026"
 
-    def test_wordpress_destination_resolves_credentials_and_local_dir(
-        self, tmp_path
-    ):
+    def test_wordpress_destination_resolves_credentials_and_local_dir(self, tmp_path):
         mgr = _make_mgr(
             {
                 "destinations": {
@@ -187,9 +184,7 @@ class TestResolveDestinations:
         assert dest["application_password_env"] == "GPS_WP_APP_PASSWORD"
         assert "~" not in dest["publish_dir"]
 
-    def test_wordpress_destination_requires_credential_env_names(
-        self, tmp_path
-    ):
+    def test_wordpress_destination_requires_credential_env_names(self, tmp_path):
         mgr = _make_mgr(
             {
                 "destinations": {
@@ -222,11 +217,7 @@ class TestResolveDestinations:
 
     def test_static_missing_publish_dir_raises(self, tmp_path):
         mgr = _make_mgr(
-            {
-                "destinations": {
-                    "gp": {"type": "static", "base_url": "https://x.com"}
-                }
-            },
+            {"destinations": {"gp": {"type": "static", "base_url": "https://x.com"}}},
             tmp_path,
         )
         with pytest.raises(ValueError, match="publish_dir"):
@@ -265,9 +256,7 @@ class TestResolveDestinations:
             mgr.resolve_destinations()
 
     def test_non_mapping_destination_raises(self, tmp_path):
-        mgr = _make_mgr(
-            {"destinations": {"gp": "not-a-dict"}}, tmp_path
-        )
+        mgr = _make_mgr({"destinations": {"gp": "not-a-dict"}}, tmp_path)
         with pytest.raises(ValueError, match="must be a mapping"):
             mgr.resolve_destinations()
 
@@ -335,9 +324,7 @@ class TestPodcastResolutionWithDestination:
             resolved["publish"]["base_url"]
             == "https://podcasts.getpagespeed.com/crosswire"
         )
-        assert resolved["publish"]["publish_dir"].endswith(
-            "publish/gp/crosswire"
-        )
+        assert resolved["publish"]["publish_dir"].endswith("publish/gp/crosswire")
         assert resolved["publish"]["sync_command"] == "echo sync"
 
     def test_static_with_explicit_slug_override(self, tmp_path):
@@ -367,9 +354,7 @@ class TestPodcastResolutionWithDestination:
             resolved["publish"]["base_url"]
             == "https://podcasts.getpagespeed.com/the-stack"
         )
-        assert resolved["publish"]["publish_dir"].endswith(
-            "publish/gp/the-stack"
-        )
+        assert resolved["publish"]["publish_dir"].endswith("publish/gp/the-stack")
 
     def test_static_root_mounted_empty_slug(self, tmp_path):
         mgr = _make_mgr(
@@ -394,14 +379,9 @@ class TestPodcastResolutionWithDestination:
         resolved = mgr.resolve_podcast_configs()["only"]
         assert resolved["slug"] == ""
         # Root-mounted: no /{slug} suffix
-        assert (
-            resolved["publish"]["base_url"]
-            == "https://www.example.com/podcast"
-        )
+        assert resolved["publish"]["base_url"] == "https://www.example.com/podcast"
         assert resolved["publish"]["publish_dir"].endswith("publish/host")
-        assert not resolved["publish"]["publish_dir"].endswith(
-            "publish/host/only"
-        )
+        assert not resolved["publish"]["publish_dir"].endswith("publish/host/only")
 
     def test_per_podcast_show_metadata_merged(self, tmp_path):
         """Per-podcast show keys (artwork, description) coexist with destination keys."""
@@ -467,10 +447,7 @@ class TestPodcastResolutionWithDestination:
         assert resolved["destination_type"] == "astro_collection"
         assert resolved["slug"] is None
         # base_url is normalized (no trailing slash)
-        assert (
-            resolved["publish"]["base_url"]
-            == "https://www.vaske.ru/podcast"
-        )
+        assert resolved["publish"]["base_url"] == "https://www.vaske.ru/podcast"
         assert resolved["publish"]["content_dir"].endswith("vaske/content")
         assert resolved["publish"]["public_dir"].endswith("vaske/public")
         assert resolved["publish"]["sync_command"] == "echo vaske"
@@ -485,10 +462,7 @@ class TestPodcastResolutionWithDestination:
                     "web": {
                         "gps": {
                             "type": "wordpress",
-                            "url": (
-                                "https://www.getpagespeed.com/"
-                                "wp-json/wp/v2/posts"
-                            ),
+                            "url": ("https://www.getpagespeed.com/wp-json/wp/v2/posts"),
                         }
                     },
                 },
@@ -556,9 +530,7 @@ class TestValidationErrors:
                         "publish_dir": "./a",
                     }
                 },
-                "podcasts": {
-                    "foo": {"destination": "bar", "title": "Foo"}
-                },
+                "podcasts": {"foo": {"destination": "bar", "title": "Foo"}},
             },
             tmp_path,
         )
@@ -573,9 +545,7 @@ class TestValidationErrors:
             ("sync_command", "rsync -x ..."),
         ],
     )
-    def test_forbidden_key_in_podcast_publish(
-        self, tmp_path, forbidden_key, value
-    ):
+    def test_forbidden_key_in_podcast_publish(self, tmp_path, forbidden_key, value):
         mgr = _make_mgr(
             {
                 "destinations": {
@@ -700,9 +670,7 @@ class TestBackwardCompat:
         assert resolved["destination_name"] is None
         assert resolved["destination_type"] is None
         assert resolved["slug"] is None
-        assert (
-            resolved["publish"]["base_url"] == "https://example.com/legacy"
-        )
+        assert resolved["publish"]["base_url"] == "https://example.com/legacy"
         assert resolved["publish"]["sync_command"] == "echo legacy"
         assert resolved["publish"]["show_description"] == "Legacy show."
 
@@ -825,7 +793,8 @@ class TestPrivateStaticDestination:
         }
 
     def test_resolves_private_token_path_only_into_private_show(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Carry only the credential path into the resolved publish config."""
         mgr = _make_mgr(self._private_config(tmp_path), tmp_path)
@@ -834,9 +803,7 @@ class TestPrivateStaticDestination:
         podcast = mgr.resolve_podcast_configs()["morning"]
 
         assert destination["private_token_file"] == str(tmp_path / "token")
-        assert podcast["publish"]["private_token_file"] == str(
-            tmp_path / "token"
-        )
+        assert podcast["publish"]["private_token_file"] == str(tmp_path / "token")
         assert podcast["input_mode"] == "external_script"
         assert "token" not in podcast["publish"]
 
@@ -849,7 +816,9 @@ class TestPrivateStaticDestination:
         ],
     )
     def test_rejects_unprotected_or_query_bearing_base_url(
-        self, tmp_path: Path, base_url: str,
+        self,
+        tmp_path: Path,
+        base_url: str,
     ) -> None:
         """Require a query-free HTTPS origin before token decoration."""
         config = self._private_config(tmp_path)
@@ -882,7 +851,9 @@ class TestPrivateStaticDestination:
         ],
     )
     def test_rejects_non_dedicated_private_destination(
-        self, tmp_path: Path, podcasts: dict,
+        self,
+        tmp_path: Path,
+        podcasts: dict,
     ) -> None:
         """Require exactly one root-mounted show on a private destination."""
         config = self._private_config(tmp_path)
@@ -900,7 +871,8 @@ class TestPrivateStaticDestination:
             _make_mgr(config, tmp_path).resolve_podcast_configs()
 
     def test_rejects_private_destination_without_named_podcasts(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Reject an unbound private destination in legacy configuration."""
         config = self._private_config(tmp_path)

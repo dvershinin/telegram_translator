@@ -178,13 +178,25 @@ def create_fullpage_artwork(source_3000: Image.Image) -> Image.Image:
     # "THE STACK" — scaled for fullpage
     font_title = ImageFont.truetype(MENLO, size=110, index=1)  # Bold
     draw_spaced_text(
-        draw, "THE STACK", font_title, safe_center_x, y=780, spacing=18, fill=TITLE_COLOR
+        draw,
+        "THE STACK",
+        font_title,
+        safe_center_x,
+        y=780,
+        spacing=18,
+        fill=TITLE_COLOR,
     )
 
     # "DAILY TECH"
     font_sub = ImageFont.truetype(MENLO, size=45, index=0)  # Regular
     draw_spaced_text(
-        draw, "DAILY TECH", font_sub, safe_center_x, y=910, spacing=12, fill=SUBTITLE_COLOR
+        draw,
+        "DAILY TECH",
+        font_sub,
+        safe_center_x,
+        y=910,
+        spacing=12,
+        fill=SUBTITLE_COLOR,
     )
 
     return canvas

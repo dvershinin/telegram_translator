@@ -54,7 +54,9 @@ class TestExcludeUsedScopedToPodcast:
 
         since = datetime.now(tz=timezone.utc) - timedelta(hours=1)
         result = store.get_content_since(
-            since, exclude_used=True, exclude_podcast="podcast_b",
+            since,
+            exclude_used=True,
+            exclude_podcast="podcast_b",
         )
 
         result_ids = {item.id for item in result}
@@ -91,7 +93,9 @@ class TestExcludeUsedSamePodcast:
 
         since = datetime.now(tz=timezone.utc) - timedelta(hours=1)
         result = store.get_content_since(
-            since, exclude_used=True, exclude_podcast="podcast_a",
+            since,
+            exclude_used=True,
+            exclude_podcast="podcast_a",
         )
 
         result_ids = {item.id for item in result}
@@ -108,7 +112,9 @@ class TestExcludeUsedNoItemsUsed:
 
         since = datetime.now(tz=timezone.utc) - timedelta(hours=1)
         result = store.get_content_since(
-            since, exclude_used=True, exclude_podcast="podcast_a",
+            since,
+            exclude_used=True,
+            exclude_podcast="podcast_a",
         )
 
         assert len(result) == 3
@@ -122,9 +128,7 @@ class TestGetContentItemsByIds:
 
     def test_returns_requested_order_and_omits_missing(self, store):
         ids = _insert_items(store, count=3)
-        result = store.get_content_items_by_ids(
-            [ids[2], 999999, ids[0]]
-        )
+        result = store.get_content_items_by_ids([ids[2], 999999, ids[0]])
         assert [item.id for item in result] == [ids[2], ids[0]]
 
 

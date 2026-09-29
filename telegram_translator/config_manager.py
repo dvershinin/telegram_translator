@@ -22,17 +22,18 @@ _FORBIDDEN_PODCAST_PUBLISH_KEYS = (
 _VALID_DESTINATION_TYPES = ("static", "astro_collection", "wordpress")
 _VALID_INPUT_MODES = ("news", "external_script")
 
+
 class ConfigManager:
     """Manages configuration for the Telegram Translator app"""
-    
+
     def __init__(self, config_file: str = "config.yml"):
         self.config_file = config_file
         self.config = self._load_config()
-        
+
         # Initialize app directories using appdirs
         self.app_name = "telegram_translator"
         self.app_author = "telegram_translator"
-        
+
         # Get proper cross-platform paths
         self.data_dir = Path(user_data_dir(self.app_name, self.app_author))
         self.config_dir = Path(user_config_dir(self.app_name, self.app_author))
@@ -40,10 +41,10 @@ class ConfigManager:
         self.logs_dir = self.data_dir / "logs"
         self.databases_dir = self.data_dir / "databases"
         self.podcasts_dir = Path("./podcasts")
-        
+
         # Create directories if they don't exist
         self._ensure_directories()
-        
+
     def _ensure_directories(self):
         """Ensure all required directories exist"""
         directories = [
@@ -54,113 +55,121 @@ class ConfigManager:
             self.databases_dir,
             self.podcasts_dir,
         ]
-        
+
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
             logger.debug(f"Ensured directory exists: {directory}")
-    
+
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from YAML file"""
         try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
+            with open(self.config_file, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except FileNotFoundError:
             raise FileNotFoundError(f"Configuration file not found: {self.config_file}")
         except yaml.YAMLError as e:
             raise ValueError(f"Error parsing configuration file: {e}")
-    
+
     def get_telegram_credentials(self) -> Dict[str, Any]:
         """Get Telegram API credentials"""
         # Try environment variables first
-        api_id = os.getenv('TTR_API_ID')
-        api_hash = os.getenv('TTR_API_HASH')
-        session_name = os.getenv('TTR_SESSION_NAME', 'telegram_translator_session')
-        
+        api_id = os.getenv("TTR_API_ID")
+        api_hash = os.getenv("TTR_API_HASH")
+        session_name = os.getenv("TTR_SESSION_NAME", "telegram_translator_session")
+
         # Fall back to config file - check both root level and telegram section
         if not api_id or not api_hash:
             # First try root level (new format)
-            api_id = api_id or self.config.get('api_id')
-            api_hash = api_hash or self.config.get('api_hash')
-            session_name = session_name or self.config.get('session_name', 'telegram_translator_session')
-            
+            api_id = api_id or self.config.get("api_id")
+            api_hash = api_hash or self.config.get("api_hash")
+            session_name = session_name or self.config.get(
+                "session_name", "telegram_translator_session"
+            )
+
             # Then try telegram section (old format)
             if not api_id or not api_hash:
-                telegram_config = self.config.get('telegram', {})
-                api_id = api_id or telegram_config.get('api_id')
-                api_hash = api_hash or telegram_config.get('api_hash')
-                session_name = session_name or telegram_config.get('session_name', 'telegram_translator_session')
-        
+                telegram_config = self.config.get("telegram", {})
+                api_id = api_id or telegram_config.get("api_id")
+                api_hash = api_hash or telegram_config.get("api_hash")
+                session_name = session_name or telegram_config.get(
+                    "session_name", "telegram_translator_session"
+                )
+
         if not api_id or not api_hash:
-            raise ValueError("Telegram API credentials not found. Please set TTR_API_ID and TTR_API_HASH environment variables or configure them in config.yml")
-        
+            raise ValueError(
+                "Telegram API credentials not found. Please set TTR_API_ID and TTR_API_HASH environment variables or configure them in config.yml"
+            )
+
         # Use proper session path
         session_path = self.sessions_dir / session_name
-        
+
         return {
-            'api_id': int(api_id),
-            'api_hash': api_hash,
-            'session_name': str(session_path)
+            "api_id": int(api_id),
+            "api_hash": api_hash,
+            "session_name": str(session_path),
         }
-    
+
     def get_translation_config(self) -> Dict[str, Any]:
         """Get translation configuration"""
-        translation_config = self.config.get('translation', {})
-        
+        translation_config = self.config.get("translation", {})
+
         # Handle environment variable substitution
-        if translation_config.get('provider') == 'openai':
-            openai_config = translation_config.get('openai', {})
-            api_key = os.getenv('OPENAI_API_KEY') or openai_config.get('api_key')
+        if translation_config.get("provider") == "openai":
+            openai_config = translation_config.get("openai", {})
+            api_key = os.getenv("OPENAI_API_KEY") or openai_config.get("api_key")
             if api_key:
-                openai_config['api_key'] = api_key
-            translation_config['openai'] = openai_config
-        
+                openai_config["api_key"] = api_key
+            translation_config["openai"] = openai_config
+
         return translation_config
-    
+
     def get_processing_config(self) -> Dict[str, Any]:
         """Get message processing configuration"""
-        return self.config.get('processing', {})
-    
+        return self.config.get("processing", {})
+
     def get_logging_config(self) -> Dict[str, Any]:
         """Get logging configuration"""
-        logging_config = self.config.get('logging', {})
-        
+        logging_config = self.config.get("logging", {})
+
         # Use proper log file path
-        log_file = logging_config.get('file', 'telegram_translator.log')
+        log_file = logging_config.get("file", "telegram_translator.log")
         if not Path(log_file).is_absolute():
             log_file = self.logs_dir / log_file
-        
-        logging_config['file'] = str(log_file)
+
+        logging_config["file"] = str(log_file)
         return logging_config
-    
+
     def get_log_path(self) -> str:
         """Get the log file path"""
         logging_config = self.get_logging_config()
-        return logging_config.get('file', str(self.logs_dir / 'telegram_translator.log'))
-    
+        return logging_config.get(
+            "file", str(self.logs_dir / "telegram_translator.log")
+        )
+
     def get_excluded_channels(self) -> list:
         """Get list of excluded channels"""
-        return self.config.get('excluded_channels', [])
-    
+        return self.config.get("excluded_channels", [])
+
     def is_channel_excluded(self, channel_name: str) -> bool:
         """Check if a channel is excluded"""
         excluded_channels = self.get_excluded_channels()
         return channel_name in excluded_channels
-    
+
     def get_database_path(self, database_name: str = "persistence.db") -> str:
         """Get the database file path"""
         return str(self.databases_dir / database_name)
-    
+
     def get_app_directories(self) -> Dict[str, str]:
         """Get all app directories for debugging/info"""
         return {
-            'data_dir': str(self.data_dir),
-            'config_dir': str(self.config_dir),
-            'sessions_dir': str(self.sessions_dir),
-            'logs_dir': str(self.logs_dir),
-            'databases_dir': str(self.databases_dir),
-            'podcasts_dir': str(self.podcasts_dir),
+            "data_dir": str(self.data_dir),
+            "config_dir": str(self.config_dir),
+            "sessions_dir": str(self.sessions_dir),
+            "logs_dir": str(self.logs_dir),
+            "databases_dir": str(self.databases_dir),
+            "podcasts_dir": str(self.podcasts_dir),
         }
-    
+
     def resolve_destinations(self) -> Dict[str, Dict[str, Any]]:
         """Resolve all publish destinations.
 
@@ -181,8 +190,7 @@ class ConfigManager:
         for name, cfg in raw.items():
             if not isinstance(cfg, dict):
                 raise ValueError(
-                    f"Destination '{name}' must be a mapping, "
-                    f"got {type(cfg).__name__}"
+                    f"Destination '{name}' must be a mapping, got {type(cfg).__name__}"
                 )
 
             dest_type = cfg.get("type", "static")
@@ -234,16 +242,11 @@ class ConfigManager:
                 publish_dir = cfg.get("publish_dir")
                 if not publish_dir:
                     raise ValueError(
-                        f"Static destination '{name}' requires "
-                        f"'publish_dir'"
+                        f"Static destination '{name}' requires 'publish_dir'"
                     )
-                entry["publish_dir"] = str(
-                    Path(publish_dir).expanduser()
-                )
+                entry["publish_dir"] = str(Path(publish_dir).expanduser())
                 entry["site_title"] = cfg.get("site_title", "")
-                entry["site_description"] = cfg.get(
-                    "site_description", ""
-                )
+                entry["site_description"] = cfg.get("site_description", "")
                 entry["copyright"] = cfg.get("copyright", "")
             elif dest_type == "astro_collection":
                 content_dir = cfg.get("content_dir")
@@ -253,40 +256,25 @@ class ConfigManager:
                         f"astro_collection destination '{name}' "
                         f"requires both 'content_dir' and 'public_dir'"
                     )
-                entry["content_dir"] = str(
-                    Path(content_dir).expanduser()
-                )
-                entry["public_dir"] = str(
-                    Path(public_dir).expanduser()
-                )
+                entry["content_dir"] = str(Path(content_dir).expanduser())
+                entry["public_dir"] = str(Path(public_dir).expanduser())
             else:  # wordpress
                 if not base_url:
                     raise ValueError(
-                        f"WordPress destination '{name}' requires "
-                        f"'base_url'"
+                        f"WordPress destination '{name}' requires 'base_url'"
                     )
                 username_env = cfg.get("username_env")
-                application_password_env = cfg.get(
-                    "application_password_env"
-                )
+                application_password_env = cfg.get("application_password_env")
                 if not username_env or not application_password_env:
                     raise ValueError(
                         f"WordPress destination '{name}' requires both "
                         f"'username_env' and 'application_password_env'"
                     )
-                publish_dir = cfg.get(
-                    "publish_dir", f"./publish/{name}"
-                )
-                entry["publish_dir"] = str(
-                    Path(publish_dir).expanduser()
-                )
+                publish_dir = cfg.get("publish_dir", f"./publish/{name}")
+                entry["publish_dir"] = str(Path(publish_dir).expanduser())
                 entry["username_env"] = str(username_env)
-                entry["application_password_env"] = str(
-                    application_password_env
-                )
-                entry["post_type"] = str(
-                    cfg.get("post_type", "podcast")
-                )
+                entry["application_password_env"] = str(application_password_env)
+                entry["post_type"] = str(cfg.get("post_type", "podcast"))
 
             resolved[name] = entry
 
@@ -311,9 +299,7 @@ class ConfigManager:
         if not podcasts_raw:
             # Legacy fallback: synthesise _default from flat sections
             resolved = {"_default": self._build_legacy_podcast_config()}
-            self._validate_destination_grouping(
-                resolved, self.resolve_destinations()
-            )
+            self._validate_destination_grouping(resolved, self.resolve_destinations())
             return resolved
 
         destinations = self.resolve_destinations()
@@ -425,9 +411,7 @@ class ConfigManager:
         all_podcasts = self.resolve_podcast_configs()
         if name not in all_podcasts:
             available = list(all_podcasts.keys())
-            raise ValueError(
-                f"Unknown podcast '{name}'. Available: {available}"
-            )
+            raise ValueError(f"Unknown podcast '{name}'. Available: {available}")
         return all_podcasts[name]
 
     def _resolve_single_podcast(
@@ -481,7 +465,8 @@ class ConfigManager:
             else:
                 logger.warning(
                     "Podcast '%s' references unknown source '%s'",
-                    name, ref,
+                    name,
+                    ref,
                 )
 
         default_assets = str(
@@ -532,15 +517,9 @@ class ConfigManager:
                     "whoosh",
                     str(Path(default_assets) / "whoosh.wav"),
                 ),
-                "lead_in_seconds": float(
-                    audio_cfg.get("lead_in_seconds", 4.0)
-                ),
-                "intro_fade_seconds": float(
-                    audio_cfg.get("intro_fade_seconds", 2.0)
-                ),
-                "intro_bed_volume": float(
-                    audio_cfg.get("intro_bed_volume", 0.7)
-                ),
+                "lead_in_seconds": float(audio_cfg.get("lead_in_seconds", 4.0)),
+                "intro_fade_seconds": float(audio_cfg.get("intro_fade_seconds", 2.0)),
+                "intro_bed_volume": float(audio_cfg.get("intro_bed_volume", 0.7)),
                 "background_bed_volume": float(
                     audio_cfg.get("background_bed_volume", 0.08)
                 ),
@@ -557,9 +536,7 @@ class ConfigManager:
                 ),
             },
             "output_dir": cfg.get("output_dir", f"./podcasts/{name}"),
-            "pause_between_segments_ms": int(
-                cfg.get("pause_between_segments_ms", 800)
-            ),
+            "pause_between_segments_ms": int(cfg.get("pause_between_segments_ms", 800)),
             "publish": publish_dict,
             "destination_name": destination_name,
             "destination_type": destination_type,
@@ -624,9 +601,7 @@ class ConfigManager:
             slug = name if slug_raw is None else str(slug_raw)
             if slug:
                 derived_base_url = f"{base_url}/{slug}"
-                derived_publish_dir = str(
-                    Path(dest["publish_dir"]) / slug
-                )
+                derived_publish_dir = str(Path(dest["publish_dir"]) / slug)
             else:
                 derived_base_url = base_url
                 derived_publish_dir = dest["publish_dir"]
@@ -643,15 +618,12 @@ class ConfigManager:
             publish = dict(raw_publish)
             if not publish.get("series_id"):
                 raise ValueError(
-                    f"WordPress podcast '{name}' requires "
-                    f"'publish.series_id'"
+                    f"WordPress podcast '{name}' requires 'publish.series_id'"
                 )
             publish["base_url"] = base_url
             publish["publish_dir"] = dest["publish_dir"]
             publish["username_env"] = dest["username_env"]
-            publish["application_password_env"] = dest[
-                "application_password_env"
-            ]
+            publish["application_password_env"] = dest["application_password_env"]
             publish["post_type"] = dest.get("post_type", "podcast")
             return publish, dest_ref, dest_type, None
 
@@ -679,8 +651,9 @@ class ConfigManager:
 
         # In legacy mode, all sources are included
         all_sources = self.config.get("sources", {})
-        all_source_names = list(all_sources.get("telegram", {}).keys()) + \
-            list(all_sources.get("web", {}).keys())
+        all_source_names = list(all_sources.get("telegram", {}).keys()) + list(
+            all_sources.get("web", {}).keys()
+        )
 
         return {
             "name": "_default",
@@ -703,9 +676,7 @@ class ConfigManager:
             ),
             "audio": {
                 "intro_bed": str(Path(default_assets) / "news_bed.wav"),
-                "background_bed": str(
-                    Path(default_assets) / "background_bed.mp3"
-                ),
+                "background_bed": str(Path(default_assets) / "background_bed.mp3"),
                 "whoosh": str(Path(default_assets) / "whoosh.wav"),
                 "lead_in_seconds": 4.0,
                 "intro_fade_seconds": 2.0,
@@ -729,7 +700,7 @@ class ConfigManager:
         directories = self.get_app_directories()
         for name, path in directories.items():
             print(f"   {name}: {path}")
-        
+
         # Check if directories exist
         print("\n📂 Directory Status:")
         for name, path in directories.items():

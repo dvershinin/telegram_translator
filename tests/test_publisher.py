@@ -61,9 +61,7 @@ def _fake_podcast(name, title, slug, description=""):
 class TestBuildStaticSiteIndex:
     """PodcastPublisher.build_static_site_index() behavior."""
 
-    def test_multi_podcast_writes_index(
-        self, static_destination_cfg, fake_store
-    ):
+    def test_multi_podcast_writes_index(self, static_destination_cfg, fake_store):
         publish_dir = Path(static_destination_cfg["publish_dir"])
         (publish_dir / "crosswire").mkdir()
         (publish_dir / "the-stack").mkdir()
@@ -71,12 +69,8 @@ class TestBuildStaticSiteIndex:
         (publish_dir / "the-stack" / "artwork_thumb.jpg").write_bytes(b"x")
 
         podcasts = [
-            _fake_podcast(
-                "crosswire", "Crosswire", "crosswire", "Geopolitics show."
-            ),
-            _fake_podcast(
-                "the_stack", "The Stack", "the-stack", "Tech show."
-            ),
+            _fake_podcast("crosswire", "Crosswire", "crosswire", "Geopolitics show."),
+            _fake_podcast("the_stack", "The Stack", "the-stack", "Tech show."),
         ]
         path = PodcastPublisher.build_static_site_index(
             "gp", static_destination_cfg, podcasts, fake_store
@@ -110,9 +104,7 @@ class TestBuildStaticSiteIndex:
         # fake_store returns a digest dated 2026-04-11 for any podcast
         assert html.count("Latest episode: 2026-04-11") == 2
 
-    def test_shows_description_as_html(
-        self, static_destination_cfg, fake_store
-    ):
+    def test_shows_description_as_html(self, static_destination_cfg, fake_store):
         publish_dir = Path(static_destination_cfg["publish_dir"])
         (publish_dir / "p").mkdir()
         podcasts = [
@@ -160,9 +152,7 @@ class TestBuildStaticSiteIndex:
         zebra_pos = html.find(">Zebra<")
         assert 0 < alpha_pos < middle_pos < zebra_pos
 
-    def test_single_root_mounted_returns_none(
-        self, static_destination_cfg, fake_store
-    ):
+    def test_single_root_mounted_returns_none(self, static_destination_cfg, fake_store):
         """Skip root index when destination has a single root-mounted podcast."""
         podcasts = [_fake_podcast("only", "Only", "")]
         path = PodcastPublisher.build_static_site_index(
@@ -173,9 +163,7 @@ class TestBuildStaticSiteIndex:
         publish_dir = Path(static_destination_cfg["publish_dir"])
         assert not (publish_dir / "index.html").exists()
 
-    def test_astro_collection_destination_returns_none(
-        self, tmp_path, fake_store
-    ):
+    def test_astro_collection_destination_returns_none(self, tmp_path, fake_store):
         dest_cfg = {
             "name": "v",
             "type": "astro_collection",
@@ -209,15 +197,11 @@ class TestAstroAudioUrl:
         assert url == "/podcast/episodes/ep.m4a"
 
     def test_base_url_host_only(self):
-        url = PodcastPublisher._astro_audio_url(
-            "https://www.vaske.ru", "ep.m4a"
-        )
+        url = PodcastPublisher._astro_audio_url("https://www.vaske.ru", "ep.m4a")
         assert url == "/episodes/ep.m4a"
 
     def test_base_url_with_trailing_slash(self):
-        url = PodcastPublisher._astro_audio_url(
-            "https://x.com/podcast/", "ep.m4a"
-        )
+        url = PodcastPublisher._astro_audio_url("https://x.com/podcast/", "ep.m4a")
         assert url == "/podcast/episodes/ep.m4a"
 
     def test_empty_base_url(self):
@@ -225,15 +209,11 @@ class TestAstroAudioUrl:
         assert url == "/episodes/ep.m4a"
 
     def test_http_scheme(self):
-        url = PodcastPublisher._astro_audio_url(
-            "http://example.com/foo", "ep.m4a"
-        )
+        url = PodcastPublisher._astro_audio_url("http://example.com/foo", "ep.m4a")
         assert url == "/foo/episodes/ep.m4a"
 
     def test_nested_path(self):
-        url = PodcastPublisher._astro_audio_url(
-            "https://site.com/a/b/c", "ep.m4a"
-        )
+        url = PodcastPublisher._astro_audio_url("https://site.com/a/b/c", "ep.m4a")
         assert url == "/a/b/c/episodes/ep.m4a"
 
 
@@ -269,26 +249,19 @@ class TestWriteAstroEpisode:
             duration=420.7,
             audio_url="/podcast/episodes/vaske_daily_2026-04-11.m4a",
             show_notes_obj=self._sample_notes(),
-            verdict_label="Вердикт "
-                          "Ваське",
+            verdict_label="Вердикт Ваське",
             content_dir=tmp_path,
         )
         assert path == tmp_path / "vaske_daily-2026-04-11.md"
         md = path.read_text()
         assert 'title: "Vaske Daily — April 11, 2026"' in md
         assert "date: 2026-04-11" in md
-        assert (
-            'audioUrl: "/podcast/episodes/vaske_daily_2026-04-11.m4a"'
-            in md
-        )
+        assert 'audioUrl: "/podcast/episodes/vaske_daily_2026-04-11.m4a"' in md
         assert "duration: 421" in md  # rounded from 420.7
         assert 'description: "Today\'s lead paragraph."' in md
         assert "### Big story" in md
         assert "Body paragraph for the big story." in md
-        assert (
-            "**Вердикт "
-            "Ваське:** Sharp take."
-        ) in md
+        assert ("**Вердикт Ваське:** Sharp take.") in md
 
     def test_description_preserves_hyphens(self, tmp_path):
         """Pre-fix bug: a regex stripped hyphens from the description."""
@@ -300,13 +273,7 @@ class TestWriteAstroEpisode:
             duration=60,
             audio_url="/p/e.m4a",
             show_notes_obj={
-                "lead": (
-                    "Сегодня "
-                    "про ИИ-"
-                    "кодинг "
-                    "и open-source "
-                    "модели."
-                ),
+                "lead": ("Сегодня про ИИ-кодинг и open-source модели."),
                 "topics": [],
             },
             verdict_label="Verdict",
@@ -335,12 +302,7 @@ class TestWriteAstroEpisode:
                     {
                         "headline": "H",
                         "paragraph": (
-                            "Вот "
-                            "executive-обзор. "
-                            "Факты, "
-                            "оценки, "
-                            "углы "
-                            "атаки."
+                            "Вот executive-обзор. Факты, оценки, углы атаки."
                         ),
                         "verdict": "V.",
                     }
@@ -350,9 +312,7 @@ class TestWriteAstroEpisode:
             content_dir=tmp_path,
         )
         md = path.read_text()
-        desc_line = next(
-            ln for ln in md.splitlines() if ln.startswith("description:")
-        )
+        desc_line = next(ln for ln in md.splitlines() if ln.startswith("description:"))
         assert desc_line == 'description: "Clean teaser."'
         assert "executive-обзор" not in desc_line
 
@@ -370,8 +330,10 @@ class TestWriteAstroEpisode:
         )
         md = path.read_text()
         # YAML double-quote escaping: " -> \"
-        assert r'title: "The \"Daily\" — April 11, 2026"' in md \
+        assert (
+            r'title: "The \"Daily\" — April 11, 2026"' in md
             or 'title: "The \\"Daily\\" — April 11, 2026"' in md
+        )
 
     def test_body_renders_topics_deterministically(self, tmp_path):
         path = PodcastPublisher._write_astro_episode(
@@ -435,12 +397,8 @@ class TestRunDestinationSync:
             result.stderr = ""
             return result
 
-        monkeypatch.setattr(
-            "telegram_translator.publisher.subprocess.run", fake_run
-        )
-        ok = PodcastPublisher.run_destination_sync(
-            "gp", {"sync_command": "echo hi"}
-        )
+        monkeypatch.setattr("telegram_translator.publisher.subprocess.run", fake_run)
+        ok = PodcastPublisher.run_destination_sync("gp", {"sync_command": "echo hi"})
         assert ok is True
         assert recorded["cmd"] == "echo hi"
         assert recorded["kwargs"].get("shell") is True
@@ -452,12 +410,8 @@ class TestRunDestinationSync:
             result.stderr = "boom"
             return result
 
-        monkeypatch.setattr(
-            "telegram_translator.publisher.subprocess.run", fake_run
-        )
-        ok = PodcastPublisher.run_destination_sync(
-            "gp", {"sync_command": "false"}
-        )
+        monkeypatch.setattr("telegram_translator.publisher.subprocess.run", fake_run)
+        ok = PodcastPublisher.run_destination_sync("gp", {"sync_command": "false"})
         assert ok is False
 
 
@@ -494,9 +448,7 @@ class TestPerPodcastIndexRegression:
                 "file_size": 1000,
             }
         ]
-        pub._build_index_html(
-            "crosswire", episodes, tmp_path, config["publish"]
-        )
+        pub._build_index_html("crosswire", episodes, tmp_path, config["publish"])
         html = (tmp_path / "index.html").read_text()
 
         # Title + headers present
@@ -507,10 +459,7 @@ class TestPerPodcastIndexRegression:
         assert "open.spotify.com/show/abc" in html
         # Subscribe button present
         assert "Subscribe via RSS" in html
-        assert (
-            'href="https://podcasts.getpagespeed.com/crosswire/feed.xml"'
-            in html
-        )
+        assert 'href="https://podcasts.getpagespeed.com/crosswire/feed.xml"' in html
         # Audio player points at the right episode URL
         assert (
             "https://podcasts.getpagespeed.com/crosswire/episodes/"
@@ -519,9 +468,9 @@ class TestPerPodcastIndexRegression:
         # Show notes rendered from Markdown
         assert "<strong>Big</strong>" in html
         # No stray f-string leakage
-        assert "{" not in html.replace("{", "").replace(
-            "}", ""
-        ) or html.count("{") == html.count("}")
+        assert "{" not in html.replace("{", "").replace("}", "") or html.count(
+            "{"
+        ) == html.count("}")
 
     def test_spotify_link_omitted_when_not_configured(self, tmp_path):
         config = {

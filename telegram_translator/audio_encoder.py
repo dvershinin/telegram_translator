@@ -29,9 +29,7 @@ def _measured_loudnorm_filter(
         RuntimeError: If ffmpeg fails or returns unusable measurements.
     """
     target = f"{float(target_lufs):g}"
-    analysis_filter = (
-        f"loudnorm=I={target}:TP=-2:LRA=11:print_format=json"
-    )
+    analysis_filter = f"loudnorm=I={target}:TP=-2:LRA=11:print_format=json"
     try:
         result = subprocess.run(
             [
@@ -68,9 +66,7 @@ def _measured_loudnorm_filter(
     except (KeyError, json.JSONDecodeError) as exc:
         raise RuntimeError("ffmpeg loudness measurements were invalid") from exc
 
-    measurements = ":".join(
-        f"{key}={value}" for key, value in values.items()
-    )
+    measurements = ":".join(f"{key}={value}" for key, value in values.items())
     return (
         f"loudnorm=I={target}:TP=-2:LRA=11:{measurements}:"
         "linear=true:print_format=summary"

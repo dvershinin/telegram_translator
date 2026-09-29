@@ -43,9 +43,7 @@ def _config_manager(tmp_path: Path) -> ConfigManager:
 
 def test_selected_podcast_collects_only_its_sources(tmp_path):
     """A targeted collection must not fetch unrelated global sources."""
-    pipeline = DigestPipeline(
-        _config_manager(tmp_path), podcast_name="articles"
-    )
+    pipeline = DigestPipeline(_config_manager(tmp_path), podcast_name="articles")
 
     assert pipeline.sources_config == {
         "telegram": {},
@@ -88,12 +86,8 @@ def test_successful_summarize_retry_clears_stale_error(monkeypatch, tmp_path):
         async def generate_podcast_script(self, *args, **kwargs):
             return "Podcast script"
 
-    monkeypatch.setattr(
-        "telegram_translator.digest.Summarizer", FakeSummarizer
-    )
-    pipeline = DigestPipeline(
-        _config_manager(tmp_path), podcast_name="articles"
-    )
+    monkeypatch.setattr("telegram_translator.digest.Summarizer", FakeSummarizer)
+    pipeline = DigestPipeline(_config_manager(tmp_path), podcast_name="articles")
     date = pipeline._today()
     pipeline.store.store_content(
         source_name="articles",

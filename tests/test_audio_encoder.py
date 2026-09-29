@@ -29,7 +29,7 @@ def test_loudness_normalization_is_opt_in(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "telegram_translator.audio_encoder.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(
-            stderr='''
+            stderr="""
             {
                 "input_i": "-29.40",
                 "input_tp": "-5.20",
@@ -37,7 +37,7 @@ def test_loudness_normalization_is_opt_in(monkeypatch, tmp_path):
                 "input_thresh": "-39.60",
                 "target_offset": "0.00"
             }
-            ''',
+            """,
         ),
     )
     destination = tmp_path / "episode.m4a"

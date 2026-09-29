@@ -1,1 +1,1 @@
-# Telegram Translator Bot Package 
+# Telegram Translator Bot Package

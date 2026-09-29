@@ -119,9 +119,7 @@ class TestShowLevelTags:
         lbd = channel.findtext("lastBuildDate")
         assert lbd is not None
         # RFC 2822 contains day-of-week abbreviation
-        assert any(
-            d in lbd for d in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        )
+        assert any(d in lbd for d in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
 
     def test_atom_self_link(self, feed_xml):
         _, root, _ = feed_xml
@@ -223,9 +221,7 @@ class TestCDATA:
     def test_description_contains_html(self, feed_xml):
         xml_text, _, _ = feed_xml
         # Extract CDATA content from description
-        start = xml_text.index("<description><![CDATA[") + len(
-            "<description><![CDATA["
-        )
+        start = xml_text.index("<description><![CDATA[") + len("<description><![CDATA[")
         end = xml_text.index("]]></description>")
         cdata_content = xml_text[start:end]
         assert "<strong>" in cdata_content

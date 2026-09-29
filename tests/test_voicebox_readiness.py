@@ -141,11 +141,13 @@ async def test_fetch_profiles_succeeds_on_first_try(monkeypatch, tmp_path):
 async def test_fetch_profiles_retries_then_succeeds(monkeypatch, tmp_path):
     """Two ConnectErrors then a 200 — caller sees only the final payload."""
     payload = [{"id": "abc", "name": "Test"}]
-    fake = _ScriptedAsyncClient([
-        httpx.ConnectError("connection refused"),
-        httpx.ReadTimeout("upstream still loading"),
-        _ok_response(payload),
-    ])
+    fake = _ScriptedAsyncClient(
+        [
+            httpx.ConnectError("connection refused"),
+            httpx.ReadTimeout("upstream still loading"),
+            _ok_response(payload),
+        ]
+    )
     _patch_async_client(monkeypatch, fake)
     sleeps = _patch_sleep(monkeypatch)
 
@@ -188,10 +190,12 @@ async def test_get_profile_id_uses_retry_path(monkeypatch, tmp_path):
         {"id": "uuid-1", "name": "Other Profile"},
         {"id": "uuid-2", "name": "test-profile"},
     ]
-    fake = _ScriptedAsyncClient([
-        httpx.ConnectError("cold spawn"),
-        _ok_response(payload),
-    ])
+    fake = _ScriptedAsyncClient(
+        [
+            httpx.ConnectError("cold spawn"),
+            _ok_response(payload),
+        ]
+    )
     _patch_async_client(monkeypatch, fake)
     _patch_sleep(monkeypatch)
 

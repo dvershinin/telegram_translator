@@ -96,15 +96,11 @@ def main() -> None:
 
     # "CROSSWIRE" — bold, large, centered on globe
     font_title = ImageFont.truetype(HELVETICA, size=110, index=1)  # Bold
-    draw_spaced_text(
-        draw, "CROSSWIRE", font_title, SAFE_CENTER_X, y=780, spacing=18
-    )
+    draw_spaced_text(draw, "CROSSWIRE", font_title, SAFE_CENTER_X, y=780, spacing=18)
 
     # "DAILY BRIEFING" — light weight, smaller
     font_sub = ImageFont.truetype(HELVETICA_NEUE, size=45, index=7)  # Light
-    draw_spaced_text(
-        draw, "DAILY BRIEFING", font_sub, SAFE_CENTER_X, y=910, spacing=12
-    )
+    draw_spaced_text(draw, "DAILY BRIEFING", font_sub, SAFE_CENTER_X, y=910, spacing=12)
 
     # Save
     canvas.save(OUTPUT_PNG, "PNG")

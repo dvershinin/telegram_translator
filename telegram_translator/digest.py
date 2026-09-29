@@ -42,8 +42,7 @@ class DigestPipeline:
             if podcast_name not in all_podcasts:
                 available = list(all_podcasts.keys())
                 raise ValueError(
-                    f"Unknown podcast '{podcast_name}'. "
-                    f"Available: {available}"
+                    f"Unknown podcast '{podcast_name}'. Available: {available}"
                 )
             self.podcast_configs = {podcast_name: all_podcasts[podcast_name]}
             self.sources_config = self.podcast_configs[podcast_name]["sources"]
@@ -70,8 +69,7 @@ class DigestPipeline:
         """
         if self.podcast_configs and not self._automated_podcast_configs():
             raise ValueError(
-                f"Cannot {operation} an external-script podcast; use "
-                "'digest ingest'"
+                f"Cannot {operation} an external-script podcast; use 'digest ingest'"
             )
 
     def _today(self) -> str:
@@ -87,9 +85,7 @@ class DigestPipeline:
         """
         if date == self._today():
             return datetime.now(tz=timezone.utc) - timedelta(hours=24)
-        return datetime.strptime(date, "%Y-%m-%d").replace(
-            tzinfo=timezone.utc
-        )
+        return datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
     async def collect(self, date: str | None = None) -> int:
         """Collect content from all configured sources.
@@ -107,9 +103,7 @@ class DigestPipeline:
 
         telegram_sources = self.sources_config.get("telegram", {})
         if telegram_sources:
-            total_new += await self._collect_telegram(
-                telegram_sources, since
-            )
+            total_new += await self._collect_telegram(telegram_sources, since)
 
         web_sources = self.sources_config.get("web", {})
         if web_sources:
@@ -153,12 +147,11 @@ class DigestPipeline:
                 from telegram_translator.translation_manager import (
                     TranslationManager,
                 )
+
                 try:
                     translation_mgr = TranslationManager(translation_config)
                 except ValueError:
-                    logger.warning(
-                        "Translation unavailable, storing original text"
-                    )
+                    logger.warning("Translation unavailable, storing original text")
 
             for channel_name, channel_config in sources.items():
                 try:
@@ -224,9 +217,7 @@ class DigestPipeline:
             if inserted:
                 new_count += 1
 
-        logger.info(
-            "Collected %d new messages from %s", new_count, channel_name
-        )
+        logger.info("Collected %d new messages from %s", new_count, channel_name)
         return new_count
 
     async def _collect_web(self, sources: dict) -> int:
@@ -245,8 +236,7 @@ class DigestPipeline:
                     url=article.url,
                     published_at=article.published_at,
                     refresh_duplicate=(
-                        sources.get(source_name, {}).get("type")
-                        == "wordpress"
+                        sources.get(source_name, {}).get("type") == "wordpress"
                     ),
                 )
                 if inserted:
@@ -306,8 +296,10 @@ class DigestPipeline:
                     msg = f"No content found for podcast '{podcast_name}'"
                     logger.warning(msg)
                     self.store.update_digest(
-                        date, podcast_name,
-                        status="error", error_message=msg,
+                        date,
+                        podcast_name,
+                        status="error",
+                        error_message=msg,
                     )
                     results[podcast_name] = {
                         "source_summaries": {},
@@ -324,19 +316,22 @@ class DigestPipeline:
                 filtered_items_by_source = None
                 if selection_prompt:
                     all_items = self.store.get_content_since(
-                        since, source_names=source_filter,
+                        since,
+                        source_names=source_filter,
                         exclude_used=True,
                         exclude_podcast=podcast_name,
                     )
                     all_items = await summarizer.select_content(
-                        all_items, selection_prompt,
+                        all_items,
+                        selection_prompt,
                     )
                     # Track selected item IDs for publish-time marking
                     selected_ids = [
                         item.id for item in all_items if item.id is not None
                     ]
                     self.store.update_digest(
-                        date, podcast_name,
+                        date,
+                        podcast_name,
                         selected_item_ids=json.dumps(selected_ids),
                     )
 
@@ -355,8 +350,10 @@ class DigestPipeline:
                         )
                         logger.warning(msg)
                         self.store.update_digest(
-                            date, podcast_name,
-                            status="error", error_message=msg,
+                            date,
+                            podcast_name,
+                            status="error",
+                            error_message=msg,
                         )
                         results[podcast_name] = {
                             "source_summaries": {},
@@ -376,9 +373,7 @@ class DigestPipeline:
                 source_biases = {}
                 for source_name in source_names:
                     if filtered_items_by_source is not None:
-                        items = filtered_items_by_source.get(
-                            source_name, []
-                        )
+                        items = filtered_items_by_source.get(source_name, [])
                     else:
                         items = self.store.get_content_since(
                             since, source_name=source_name
@@ -401,15 +396,15 @@ class DigestPipeline:
 
                 # Inject prior episode context for dedup
                 prior = self.store.get_recent_summaries(
-                    podcast_name, date, limit=3,
+                    podcast_name,
+                    date,
+                    limit=3,
                 )
                 prior_context = None
                 if prior:
                     parts = []
                     for pdate, psummary in prior:
-                        parts.append(
-                            f"[{pdate}]:\n{psummary[:2000]}"
-                        )
+                        parts.append(f"[{pdate}]:\n{psummary[:2000]}")
                     prior_context = (
                         "PREVIOUSLY COVERED (recent episodes — "
                         "focus on what is NEW today, don't "
@@ -452,18 +447,19 @@ class DigestPipeline:
                     "show_notes": show_notes,
                     "podcast_script": script,
                 }
-                logger.info(
-                    "Summarization complete for %s/%s", podcast_name, date
-                )
+                logger.info("Summarization complete for %s/%s", podcast_name, date)
 
             except Exception as e:
                 self.store.update_digest(
-                    date, podcast_name,
-                    status="error", error_message=str(e),
+                    date,
+                    podcast_name,
+                    status="error",
+                    error_message=str(e),
                 )
                 logger.error(
                     "Summarization failed for %s/%s",
-                    podcast_name, date,
+                    podcast_name,
+                    date,
                     exc_info=True,
                 )
                 raise
@@ -508,9 +504,7 @@ class DigestPipeline:
                     "Run 'digest summarize' first."
                 )
 
-            self.store.update_digest(
-                date, podcast_name, status="generating"
-            )
+            self.store.update_digest(date, podcast_name, status="generating")
 
             try:
                 generator = PodcastGenerator(
@@ -527,20 +521,18 @@ class DigestPipeline:
                     podcast_name,
                     audio_path=str(audio_path),
                     status="complete",
-                    completed_at=datetime.now(
-                        tz=timezone.utc
-                    ).isoformat(),
+                    completed_at=datetime.now(tz=timezone.utc).isoformat(),
                 )
 
                 results[podcast_name] = str(audio_path)
-                logger.info(
-                    "Podcast complete for %s: %s", podcast_name, audio_path
-                )
+                logger.info("Podcast complete for %s: %s", podcast_name, audio_path)
 
             except Exception as e:
                 self.store.update_digest(
-                    date, podcast_name,
-                    status="error", error_message=str(e),
+                    date,
+                    podcast_name,
+                    status="error",
+                    error_message=str(e),
                 )
                 logger.error(
                     "Podcast generation failed for %s",

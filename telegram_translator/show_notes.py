@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import re
 
-
 # Truncation cap matches what fits cleanly into OG/Twitter description meta
 # tags without wrapping in the episode-list teaser on the Vaske site.
 DEFAULT_DESCRIPTION_MAX = 260
@@ -56,15 +55,11 @@ def parse_show_notes(raw: str) -> dict:
     cleaned_topics = []
     for idx, topic in enumerate(topics):
         if not isinstance(topic, dict):
-            raise ValueError(
-                f"show_notes.topics[{idx}] must be an object"
-            )
+            raise ValueError(f"show_notes.topics[{idx}] must be an object")
         for field in ("headline", "paragraph", "verdict"):
             value = topic.get(field)
             if not isinstance(value, str):
-                raise ValueError(
-                    f"show_notes.topics[{idx}].{field} must be a string"
-                )
+                raise ValueError(f"show_notes.topics[{idx}].{field} must be a string")
         cleaned_topics.append(
             {
                 "headline": topic["headline"].strip(),
@@ -77,7 +72,8 @@ def parse_show_notes(raw: str) -> dict:
 
 
 def render_description(
-    show_notes: dict, max_chars: int = DEFAULT_DESCRIPTION_MAX,
+    show_notes: dict,
+    max_chars: int = DEFAULT_DESCRIPTION_MAX,
 ) -> str:
     """Render the YAML frontmatter ``description`` field.
 

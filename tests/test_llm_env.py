@@ -133,7 +133,12 @@ def test_thinking_does_not_mutate_caller_mapping():
 
 @pytest.mark.parametrize(
     "model,pinned",
-    [("gpt-5.6-luna", True), ("gpt-5", True), ("gpt-4o", False), ("deepseek-v4-flash", False)],
+    [
+        ("gpt-5.6-luna", True),
+        ("gpt-5", True),
+        ("gpt-4o", False),
+        ("deepseek-v4-flash", False),
+    ],
 )
 def test_pins_default_temperature(model, pinned):
     assert pins_default_temperature(model) is pinned
@@ -256,7 +261,9 @@ class TestStrictSchemaBaseUrl:
 class TestStructuredSchemas:
     """The two schemas must stay valid for DeepSeek strict mode."""
 
-    @pytest.mark.parametrize("schema_name", ["PODCAST_SCRIPT_SCHEMA", "SHOW_NOTES_SCHEMA"])
+    @pytest.mark.parametrize(
+        "schema_name", ["PODCAST_SCRIPT_SCHEMA", "SHOW_NOTES_SCHEMA"]
+    )
     def test_every_property_is_required_and_closed(self, schema_name):
         """Strict mode rejects objects whose `required` omits any property."""
         import telegram_translator.summarizer as s
@@ -273,9 +280,9 @@ class TestStructuredSchemas:
                     f"{path}: strict mode needs required == properties, "
                     f"missing {sorted(props - required)}"
                 )
-                assert node.get("additionalProperties") is False, (
-                    f"{path}: strict mode needs additionalProperties: False"
-                )
+                assert (
+                    node.get("additionalProperties") is False
+                ), f"{path}: strict mode needs additionalProperties: False"
                 for key, child in node.get("properties", {}).items():
                     check(child, f"{path}.{key}")
             if node.get("type") == "array":

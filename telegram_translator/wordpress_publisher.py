@@ -13,7 +13,6 @@ import httpx
 
 from telegram_translator.audio_encoder import encode_m4a
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -91,11 +90,7 @@ class WordPressPodcastPublisher:
             m4a_path,
             bitrate,
             metadata,
-            (
-                float(loudness_target)
-                if loudness_target is not None
-                else None
-            ),
+            (float(loudness_target) if loudness_target is not None else None),
         )
 
         username, application_password = self._credentials()

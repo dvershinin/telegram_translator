@@ -20,13 +20,16 @@ from telegram_translator.podcast_generator import (
     _word_error_rate,
 )
 
-
 # ---------------------------------------------------------------- helpers
 
 
 def test_normalize_strips_formatting_but_keeps_digits():
     assert _normalize_spoken_tokens("Bitcoin trades at $112,485!") == [
-        "bitcoin", "trades", "at", "112", "485",
+        "bitcoin",
+        "trades",
+        "at",
+        "112",
+        "485",
     ]
 
 
@@ -77,9 +80,7 @@ class _ScriptedClient:
     async def post(self, url, json=None, files=None, data=None):
         if files is not None:
             self.transcribe_calls += 1
-            self.transcribe_languages.append(
-                (data or {}).get("language", "<omitted>")
-            )
+            self.transcribe_languages.append((data or {}).get("language", "<omitted>"))
             if not self._transcripts:
                 pytest.fail("unexpected extra transcribe call")
             item = self._transcripts.pop(0)
@@ -106,17 +107,13 @@ def _generator(tmp_path, **extra):
         "segment_max_attempts": 3,
         **extra,
     }
-    generator = PodcastGenerator(
-        config, tts_cache_dir=tmp_path / "tts_cache"
-    )
+    generator = PodcastGenerator(config, tts_cache_dir=tmp_path / "tts_cache")
     generator._profile_id = "profile-id"
     return generator
 
 
 def _patch(monkeypatch, client):
-    monkeypatch.setattr(
-        podcast_generator.httpx, "AsyncClient", lambda *a, **k: client
-    )
+    monkeypatch.setattr(podcast_generator.httpx, "AsyncClient", lambda *a, **k: client)
 
     async def _no_sleep(seconds):
         pass
@@ -142,9 +139,7 @@ async def test_verified_segment_passes_and_is_cached(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_garbled_audio_is_regenerated_then_fails_episode(
-    monkeypatch, tmp_path
-):
+async def test_garbled_audio_is_regenerated_then_fails_episode(monkeypatch, tmp_path):
     garbage = "Tick tock, tick tock. Peace out yo!"
     client = _ScriptedClient([garbage, garbage, garbage])
     _patch(monkeypatch, client)

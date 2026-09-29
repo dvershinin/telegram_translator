@@ -101,8 +101,18 @@ footer{text-align:center;padding:2rem 0;color:#444;font-size:.8rem}
 
 
 _RU_MONTHS = (
-    "января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
 )
 
 
@@ -178,15 +188,12 @@ class PodcastPublisher:
 
         private_token = None
         if publish_cfg.get("private_token_file"):
-            private_token = read_private_feed_token(
-                publish_cfg["private_token_file"]
-            )
+            private_token = read_private_feed_token(publish_cfg["private_token_file"])
 
         digest = self.store.get_digest(date, podcast_name)
         if not digest or not digest.audio_path:
             raise RuntimeError(
-                f"No audio found for {podcast_name}/{date}. "
-                "Run 'digest podcast' first."
+                f"No audio found for {podcast_name}/{date}. Run 'digest podcast' first."
             )
 
         wav_path = Path(digest.audio_path)
@@ -199,9 +206,7 @@ class PodcastPublisher:
             )
 
             wordpress = WordPressPodcastPublisher(self.config, self.store)
-            m4a_path = await wordpress.publish(
-                podcast_name, date, digest, wav_path
-            )
+            m4a_path = await wordpress.publish(podcast_name, date, digest, wav_path)
         elif destination_type == "astro_collection":
             m4a_path = await self._publish_astro(
                 podcast_name, date, digest, wav_path, publish_cfg
@@ -224,12 +229,12 @@ class PodcastPublisher:
             except (json.JSONDecodeError, TypeError):
                 logger.error(
                     "Failed to parse selected_item_ids for %s/%s",
-                    podcast_name, date, exc_info=True,
+                    podcast_name,
+                    date,
+                    exc_info=True,
                 )
 
-        logger.info(
-            "Published %s/%s -> %s", podcast_name, date, m4a_path
-        )
+        logger.info("Published %s/%s -> %s", podcast_name, date, m4a_path)
         return str(m4a_path)
 
     async def _publish_static(
@@ -254,11 +259,7 @@ class PodcastPublisher:
         Returns:
             Path to the generated M4A file.
         """
-        publish_dir = Path(
-            publish_cfg.get(
-                "publish_dir", f"./publish/{podcast_name}"
-            )
-        )
+        publish_dir = Path(publish_cfg.get("publish_dir", f"./publish/{podcast_name}"))
         episodes_dir = publish_dir / "episodes"
         episodes_dir.mkdir(parents=True, exist_ok=True)
 
@@ -268,9 +269,7 @@ class PodcastPublisher:
         bitrate = publish_cfg.get("m4a_bitrate", "128k")
 
         title = self.config.get("title", podcast_name)
-        formatted_date = _format_episode_date(
-            date, self.config.get("language", "en")
-        )
+        formatted_date = _format_episode_date(date, self.config.get("language", "en"))
         metadata = {
             "title": f"{title} \u2014 {formatted_date}",
             "artist": self.config.get("host_name", ""),
@@ -278,9 +277,7 @@ class PodcastPublisher:
             "date": date,
         }
 
-        m4a_path, duration = encode_m4a(
-            wav_path, m4a_path, bitrate, metadata
-        )
+        m4a_path, duration = encode_m4a(wav_path, m4a_path, bitrate, metadata)
 
         # Copy show artwork + generate thumbnail for HTML page
         artwork_src = publish_cfg.get("show_artwork")
@@ -301,9 +298,7 @@ class PodcastPublisher:
         )
 
         # Rebuild RSS feed + per-podcast HTML index
-        self.rebuild_feed(
-            podcast_name, publish_cfg, private_token=private_token
-        )
+        self.rebuild_feed(podcast_name, publish_cfg, private_token=private_token)
 
         # Run per-podcast sync command only for LEGACY podcasts (no
         # destination). Destination-scoped podcasts defer the sync to the
@@ -373,9 +368,7 @@ class PodcastPublisher:
         bitrate = publish_cfg.get("m4a_bitrate", "128k")
 
         title = self.config.get("title", podcast_name)
-        formatted_date = _format_episode_date(
-            date, self.config.get("language", "en")
-        )
+        formatted_date = _format_episode_date(date, self.config.get("language", "en"))
         metadata = {
             "title": f"{title} \u2014 {formatted_date}",
             "artist": self.config.get("host_name", ""),
@@ -383,9 +376,7 @@ class PodcastPublisher:
             "date": date,
         }
 
-        m4a_path, duration = encode_m4a(
-            wav_path, m4a_path, bitrate, metadata
-        )
+        m4a_path, duration = encode_m4a(wav_path, m4a_path, bitrate, metadata)
 
         # Copy show artwork into public tree — one-time only. Re-copying
         # on every run churns the Astro content-image hash and forces a
@@ -402,9 +393,7 @@ class PodcastPublisher:
                     shutil.copy2(artwork_src_path, artwork_dst)
                     logger.info("Copied artwork: %s", artwork_dst)
                 if not thumb_dst.exists():
-                    self._generate_thumbnail(
-                        artwork_src_path, public_dir_path
-                    )
+                    self._generate_thumbnail(artwork_src_path, public_dir_path)
 
         # Update digest record so subsequent publishes/feeds see it
         self.store.update_digest(
@@ -418,9 +407,7 @@ class PodcastPublisher:
         # Derive the audioUrl relative to the site root. Strip a leading
         # '<site_host>' from the base_url and append /episodes/<filename>
         # under that path so it resolves in Astro dev and prod.
-        audio_url = self._astro_audio_url(
-            publish_cfg.get("base_url", ""), m4a_filename
-        )
+        audio_url = self._astro_audio_url(publish_cfg.get("base_url", ""), m4a_filename)
 
         # Resolve show notes. The summarize step normally writes them
         # alongside executive_summary, but `digest publish` can also run
@@ -428,7 +415,9 @@ class PodcastPublisher:
         # stage existed (or without --no-cache) — fall back to
         # generating them on the fly from the cached executive summary.
         show_notes_raw = await self._ensure_show_notes(
-            podcast_name, date, digest,
+            podcast_name,
+            date,
+            digest,
         )
 
         show_notes_obj = parse_show_notes(show_notes_raw)
@@ -450,7 +439,10 @@ class PodcastPublisher:
         return str(m4a_path)
 
     async def _ensure_show_notes(
-        self, podcast_name: str, date: str, digest,
+        self,
+        podcast_name: str,
+        date: str,
+        digest,
     ) -> str:
         """Return the raw show-notes JSON, generating it if absent.
 
@@ -477,7 +469,8 @@ class PodcastPublisher:
 
         logger.info(
             "Backfilling show_notes for %s/%s from executive summary",
-            podcast_name, date,
+            podcast_name,
+            date,
         )
         from telegram_translator.summarizer import Summarizer
 
@@ -494,7 +487,9 @@ class PodcastPublisher:
             self.config.get("show_notes_prompt") or None,
         )
         self.store.update_digest(
-            date, podcast_name, show_notes=show_notes_raw,
+            date,
+            podcast_name,
+            show_notes=show_notes_raw,
         )
         return show_notes_raw
 
@@ -621,7 +616,8 @@ class PodcastPublisher:
             return thumb_path
         except Exception:
             logger.error(
-                "Failed to generate artwork thumbnail", exc_info=True,
+                "Failed to generate artwork thumbnail",
+                exc_info=True,
             )
             return None
 
@@ -658,15 +654,9 @@ class PodcastPublisher:
         """
         publish_cfg = publish_cfg or self.config.get("publish", {})
         if publish_cfg.get("private_token_file") and private_token is None:
-            private_token = read_private_feed_token(
-                publish_cfg["private_token_file"]
-            )
+            private_token = read_private_feed_token(publish_cfg["private_token_file"])
         base_url = publish_cfg.get("base_url", "")
-        publish_dir = Path(
-            publish_cfg.get(
-                "publish_dir", f"./publish/{podcast_name}"
-            )
-        )
+        publish_dir = Path(publish_cfg.get("publish_dir", f"./publish/{podcast_name}"))
 
         title = self.config.get("title", podcast_name)
 
@@ -688,36 +678,30 @@ class PodcastPublisher:
         )
 
         # Query all published episodes
-        digests = self.store.list_digests(
-            limit=1000, podcast_name=podcast_name
-        )
+        digests = self.store.list_digests(limit=1000, podcast_name=podcast_name)
         episodes = []
         for d in digests:
             if not d.m4a_path or not d.published_at:
                 continue
 
             m4a_file = Path(d.m4a_path)
-            formatted_date = datetime.strptime(
-                d.date, "%Y-%m-%d"
-            ).strftime("%B %d, %Y")
-            file_size = (
-                m4a_file.stat().st_size if m4a_file.exists() else 0
-            )
+            formatted_date = datetime.strptime(d.date, "%Y-%m-%d").strftime("%B %d, %Y")
+            file_size = m4a_file.stat().st_size if m4a_file.exists() else 0
 
-            episodes.append({
-                "title": f"{title} \u2014 {formatted_date}",
-                "description": (
-                    d.executive_summary[:4000]
-                    if d.executive_summary
-                    else ""
-                ),
-                "executive_summary": d.executive_summary or "",
-                "filename": m4a_file.name,
-                "duration_seconds": d.duration_seconds,
-                "pub_date": d.date,
-                "guid": f"{podcast_name}-{d.date}",
-                "file_size": file_size,
-            })
+            episodes.append(
+                {
+                    "title": f"{title} \u2014 {formatted_date}",
+                    "description": (
+                        d.executive_summary[:4000] if d.executive_summary else ""
+                    ),
+                    "executive_summary": d.executive_summary or "",
+                    "filename": m4a_file.name,
+                    "duration_seconds": d.duration_seconds,
+                    "pub_date": d.date,
+                    "guid": f"{podcast_name}-{d.date}",
+                    "file_size": file_size,
+                }
+            )
 
         feed_path = publish_dir / "feed.xml"
         feed.generate(episodes, feed_path)
@@ -725,7 +709,10 @@ class PodcastPublisher:
         # Build HTML index page
         if not publish_cfg.get("private_token_file"):
             self._build_index_html(
-                podcast_name, episodes, publish_dir, publish_cfg,
+                podcast_name,
+                episodes,
+                publish_dir,
+                publish_cfg,
             )
         else:
             stale_index = publish_dir / "index.html"
@@ -787,30 +774,33 @@ class PodcastPublisher:
 
             episode_cards.append(
                 f'<article class="episode">\n'
-                f'  <h2>{ep_title}</h2>\n'
+                f"  <h2>{ep_title}</h2>\n"
                 f'  <div class="meta">\n'
-                f'    <time>{html.escape(ep.get("pub_date", ""))}</time>\n'
+                f"    <time>{html.escape(ep.get('pub_date', ''))}</time>\n"
                 + (f'    <span class="duration">{dur_str}</span>\n' if dur_str else "")
-                + '  </div>\n'
+                + "  </div>\n"
                 + (
                     f'  <audio controls preload="none">\n'
                     f'    <source src="{html.escape(audio_url)}" type="audio/x-m4a">\n'
-                    f'  </audio>\n'
-                    if audio_url else ""
+                    f"  </audio>\n"
+                    if audio_url
+                    else ""
                 )
                 + (
-                    f'  <details>\n'
-                    f'    <summary>Show notes</summary>\n'
+                    f"  <details>\n"
+                    f"    <summary>Show notes</summary>\n"
                     f'    <div class="show-notes">{summary_html}</div>\n'
-                    f'  </details>\n'
-                    if summary_html else ""
+                    f"  </details>\n"
+                    if summary_html
+                    else ""
                 )
                 + (
                     f'  <a class="download" href="{html.escape(audio_url)}" '
-                    f'download>Download</a>\n'
-                    if audio_url else ""
+                    f"download>Download</a>\n"
+                    if audio_url
+                    else ""
                 )
-                + '</article>'
+                + "</article>"
             )
 
         episodes_html = "\n".join(episode_cards)
@@ -948,33 +938,27 @@ class PodcastPublisher:
                 else ""
             )
 
-            desc_html = (
-                _markdown_to_html(show_description)
-                if show_description
-                else ""
-            )
+            desc_html = _markdown_to_html(show_description) if show_description else ""
 
             cards.append(
                 f'  <article class="podcast-card">\n'
-                f'{thumb_tag}'
+                f"{thumb_tag}"
                 f'    <div class="info">\n'
                 f'      <h2><a href="{html.escape(slug)}/">'
-                f'{html.escape(title)}</a></h2>\n'
-                + (
-                    f'      <div class="desc">{desc_html}</div>\n'
-                    if desc_html else ""
-                )
+                f"{html.escape(title)}</a></h2>\n"
+                + (f'      <div class="desc">{desc_html}</div>\n' if desc_html else "")
                 + (
                     f'      <div class="latest">Latest episode: '
-                    f'{html.escape(latest_date)}</div>\n'
-                    if latest_date else ""
+                    f"{html.escape(latest_date)}</div>\n"
+                    if latest_date
+                    else ""
                 )
                 + f'      <div class="actions">\n'
                 f'        <a href="{html.escape(slug)}/">Open &rarr;</a>\n'
                 f'        <a href="{html.escape(slug)}/feed.xml">RSS</a>\n'
-                f'      </div>\n'
-                f'    </div>\n'
-                f'  </article>'
+                f"      </div>\n"
+                f"    </div>\n"
+                f"  </article>"
             )
 
         cards_html = "\n".join(cards)
@@ -1034,14 +1018,13 @@ class PodcastPublisher:
         if not content_dir or not public_dir:
             return
         try:
-            project_root = Path(
-                os.path.commonpath([str(content_dir), str(public_dir)])
-            )
+            project_root = Path(os.path.commonpath([str(content_dir), str(public_dir)]))
         except ValueError:
             logger.warning(
                 "wipe_astro_cache: content_dir and public_dir have no "
                 "common path (%s / %s) — skipping",
-                content_dir, public_dir,
+                content_dir,
+                public_dir,
             )
             return
         for sub in (".astro", "dist"):
@@ -1052,13 +1035,13 @@ class PodcastPublisher:
                     logger.info("Wiped Astro cache: %s", target)
                 except OSError as e:
                     logger.error(
-                        "Failed to wipe Astro cache %s: %s", target, e,
+                        "Failed to wipe Astro cache %s: %s",
+                        target,
+                        e,
                     )
 
     @staticmethod
-    def run_destination_sync(
-        destination_name: str, destination_cfg: dict
-    ) -> bool:
+    def run_destination_sync(destination_name: str, destination_cfg: dict) -> bool:
         """Run a destination's sync_command exactly once.
 
         Args:

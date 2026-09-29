@@ -509,7 +509,7 @@ def test_cron_installer_replaces_only_podcast_entry(tmp_path: Path) -> None:
     fake_crontab.chmod(0o755)
     fake_sudo = tmp_path / "sudo-bin"
     fake_sudo.write_text(
-        "#!/bin/bash\n" 'if [ "$1" = "-v" ]; then exit 0; fi\n' 'exec "$@"\n',
+        '#!/bin/bash\nif [ "$1" = "-v" ]; then exit 0; fi\nexec "$@"\n',
         encoding="utf-8",
     )
     fake_sudo.chmod(0o755)
@@ -524,8 +524,7 @@ def test_cron_installer_replaces_only_podcast_entry(tmp_path: Path) -> None:
             "SUDO_BIN": str(fake_sudo),
             "TARGET_USER": "danila",
             "RUNNER_PATH": (
-                "/Users/danila/Projects/telegram_translator/"
-                "scripts/daily_podcasts.sh"
+                "/Users/danila/Projects/telegram_translator/scripts/daily_podcasts.sh"
             ),
         },
     )

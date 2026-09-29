@@ -22,10 +22,9 @@ from telethon import events
 
 # Setup logging
 logging.basicConfig(
-    format='[%(levelname)s %(asctime)s] %(name)s: %(message)s',
-    level=logging.INFO
+    format="[%(levelname)s %(asctime)s] %(name)s: %(message)s", level=logging.INFO
 )
-logging.getLogger('telethon').setLevel(level=logging.WARNING)
+logging.getLogger("telethon").setLevel(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Global variables for CLI
@@ -35,17 +34,20 @@ persistence_managers = {}
 config_manager = None
 translation_manager = None
 
+
 class ContentFilter:
     """LLM-based content filtering for channels"""
-    
+
     def __init__(self, translation_manager: TranslationManager):
         self.translation_manager = translation_manager
-    
-    async def should_process_message(self, channel_name: str, message_text: str, channel_prompt: str = None) -> bool:
+
+    async def should_process_message(
+        self, channel_name: str, message_text: str, channel_prompt: str = None
+    ) -> bool:
         """Check if a message should be processed based on LLM filtering"""
         if not channel_prompt:
             return True  # No filtering if no prompt specified
-        
+
         try:
             # Create a filtering prompt
             filter_prompt = f"""
@@ -60,24 +62,27 @@ Message to evaluate:
 Respond with ONLY "YES" if the message should be processed, or "NO" if it should be skipped.
 Consider relevance, quality, and whether the content matches the filtering criteria.
 """
-            
+
             # Use the translation manager's LLM to evaluate
-            response = await self.translation_manager._call_llm(filter_prompt, max_tokens=10)
-            
+            response = await self.translation_manager._call_llm(
+                filter_prompt, max_tokens=10
+            )
+
             # Parse response
             response = response.strip().upper()
             return response.startswith("YES")
-            
+
         except Exception as e:
             logger.error(f"Error in content filtering: {e}")
             return True  # Default to processing if filtering fails
 
+
 async def handle_saved_messages(event):
     """Handle messages sent to Saved Messages for bot interaction"""
     global client, channel_manager, persistence_managers, config_manager, translation_manager
-    
+
     message_text = event.message.message.lower().strip()
-    
+
     if message_text == "/help":
         help_text = """
 🤖 Telegram Translator Bot Commands:
@@ -91,34 +96,34 @@ async def handle_saved_messages(event):
 
 For more help, visit the project repository.
 """
-        await client.send_message('me', help_text)
-    
+        await client.send_message("me", help_text)
+
     elif message_text == "/status":
         status_text = "🤖 Bot Status:\n\n"
-        
+
         # Show monitored channels
         channel_pairs = channel_manager.get_channel_pairs()
         status_text += "📡 Monitored Channels:\n"
         for pair_name, pair_config in channel_pairs.items():
-            input_channels = pair_config.get('input_channels', [])
-            output_channel = pair_config.get('output_channel')
+            input_channels = pair_config.get("input_channels", [])
+            output_channel = pair_config.get("output_channel")
             status_text += f"  {pair_name}:\n"
             status_text += f"    Input: {', '.join(input_channels)}\n"
             status_text += f"    Output: {output_channel}\n"
             status_text += f"    Translation: {'Yes' if pair_config.get('translation') else 'No'}\n"
             status_text += f"    Persistence: {'Yes' if pair_config.get('persistence') else 'No'}\n\n"
-        
+
         # Show translation provider
         provider_info = translation_manager.get_provider_info()
         status_text += f"🔤 Translation Provider: {provider_info['provider']}\n"
-        if provider_info['provider'] == 'openai':
+        if provider_info["provider"] == "openai":
             status_text += f"  Model: {provider_info['model']}\n"
-        
-        await client.send_message('me', status_text)
-    
+
+        await client.send_message("me", status_text)
+
     elif message_text == "/stats":
         stats_text = "📊 Bot Statistics:\n\n"
-        
+
         # Show persistence statistics
         if persistence_managers:
             stats_text += "💾 Persistence Statistics:\n"
@@ -128,88 +133,102 @@ For more help, visit the project repository.
                 stats_text += f"  {pair_name}:\n"
                 stats_text += f"    Total processed: {stats['total_processed']}\n"
                 stats_text += f"    Today processed: {stats['today_processed']}\n"
-                if db_info['exists']:
+                if db_info["exists"]:
                     stats_text += f"    Database size: {db_info['size_mb']} MB\n"
                 stats_text += "\n"
         else:
             stats_text += "💾 No persistence managers active\n\n"
-        
-        await client.send_message('me', stats_text)
-    
+
+        await client.send_message("me", stats_text)
+
     elif message_text == "/channels":
         channels_text = "📋 Channel Configuration:\n\n"
-        
+
         channel_pairs = channel_manager.get_channel_pairs()
         for pair_name, pair_config in channel_pairs.items():
             channels_text += f"🔗 {pair_name}:\n"
-            channels_text += f"  Description: {pair_config.get('description', 'No description')}\n"
+            channels_text += (
+                f"  Description: {pair_config.get('description', 'No description')}\n"
+            )
             channels_text += f"  Input channels: {', '.join(pair_config.get('input_channels', []))}\n"
             channels_text += f"  Output channel: {pair_config.get('output_channel')}\n"
-            channels_text += f"  Media types: {', '.join(pair_config.get('media_types', []))}\n"
-            channels_text += f"  Translation: {'Yes' if pair_config.get('translation') else 'No'}\n"
-            channels_text += f"  Persistence: {'Yes' if pair_config.get('persistence') else 'No'}\n"
-            
+            channels_text += (
+                f"  Media types: {', '.join(pair_config.get('media_types', []))}\n"
+            )
+            channels_text += (
+                f"  Translation: {'Yes' if pair_config.get('translation') else 'No'}\n"
+            )
+            channels_text += (
+                f"  Persistence: {'Yes' if pair_config.get('persistence') else 'No'}\n"
+            )
+
             # Show content filtering prompt if available
-            if pair_config.get('content_filter_prompt'):
+            if pair_config.get("content_filter_prompt"):
                 channels_text += f"  Content filter: {pair_config['content_filter_prompt'][:50]}...\n"
-            
+
             channels_text += "\n"
-        
-        await client.send_message('me', channels_text)
-    
+
+        await client.send_message("me", channels_text)
+
     elif message_text == "/filter":
         filter_text = "🔍 Content Filtering Prompts:\n\n"
-        
+
         channel_pairs = channel_manager.get_channel_pairs()
         for pair_name, pair_config in channel_pairs.items():
-            filter_prompt = pair_config.get('content_filter_prompt')
+            filter_prompt = pair_config.get("content_filter_prompt")
             if filter_prompt:
                 filter_text += f"📝 {pair_name}:\n"
                 filter_text += f"  {filter_prompt}\n\n"
             else:
                 filter_text += f"📝 {pair_name}: No filtering prompt set\n\n"
-        
-        await client.send_message('me', filter_text)
-    
+
+        await client.send_message("me", filter_text)
+
     elif message_text == "/restart":
-        await client.send_message('me', "🔄 Restarting bot...")
+        await client.send_message("me", "🔄 Restarting bot...")
         # This would require more complex restart logic
-        await client.send_message('me', "⚠️ Restart functionality not yet implemented")
-    
+        await client.send_message("me", "⚠️ Restart functionality not yet implemented")
+
     elif message_text == "/stop":
-        await client.send_message('me', "🛑 Stopping bot...")
+        await client.send_message("me", "🛑 Stopping bot...")
         await client.disconnect()
         sys.exit(0)
-    
+
     elif message_text.startswith("/"):
-        await client.send_message('me', f"❓ Unknown command: {message_text}\nUse /help for available commands.")
+        await client.send_message(
+            "me",
+            f"❓ Unknown command: {message_text}\nUse /help for available commands.",
+        )
+
 
 async def run_bot():
     """Run the Telegram Translator bot with CLI features"""
     global client, channel_manager, persistence_managers, config_manager, translation_manager
-    
+
     try:
         # Initialize configuration
         config_manager = ConfigManager()
-        translation_manager = TranslationManager(config_manager.get_translation_config())
-        
+        translation_manager = TranslationManager(
+            config_manager.get_translation_config()
+        )
+
         # Initialize the bot
         client = await initialize_bot()
-        
+
         # Initialize channel manager with client for name resolution
         channel_manager = ChannelManager(client=client)
-        
+
         # Initialize persistence managers
         persistence_managers = await initialize_persistence_managers()
-        
+
         # Setup event handlers for channel pairs
         setup_channel_pair_handlers()
-        
+
         # Setup Saved Messages handler for CLI interaction
-        @client.on(events.NewMessage(chats='me'))
+        @client.on(events.NewMessage(chats="me"))
         async def saved_messages_handler(event):
             await handle_saved_messages(event)
-        
+
         # Send startup message to Saved Messages
         startup_message = """
 🤖 Telegram Translator Bot Started!
@@ -224,21 +243,23 @@ Available commands (send to Saved Messages):
 
 Bot is now monitoring channels and ready to translate!
 """
-        await client.send_message('me', startup_message)
-        
+        await client.send_message("me", startup_message)
+
         # Run client until disconnected
         await client.run_until_disconnected()
-        
+
     except Exception as e:
         logger.error(f"Error running bot: {e}")
         if client:
-            await client.send_message('me', f"❌ Bot error: {e}")
+            await client.send_message("me", f"❌ Bot error: {e}")
         sys.exit(1)
+
 
 @click.group()
 def cli():
     """Telegram Translator Bot CLI"""
     pass
+
 
 @cli.command()
 def start():
@@ -246,40 +267,46 @@ def start():
     click.echo("🚀 Starting Telegram Translator Bot...")
     asyncio.run(run_bot())
 
+
 @cli.command()
 def status():
     """Show bot configuration and status"""
     try:
         config_manager = ConfigManager()
         channel_manager = ChannelManager("channels.yml")
-        
+
         click.echo("📊 Bot Configuration Status:")
         click.echo("=" * 40)
-        
+
         # Show app directories
         config_manager.print_app_info()
-        
+
         # Show channel configuration
         channel_manager.print_summary()
-        
+
         # Show translation provider
-        translation_manager = TranslationManager(config_manager.get_translation_config())
+        translation_manager = TranslationManager(
+            config_manager.get_translation_config()
+        )
         provider_info = translation_manager.get_provider_info()
         click.echo(f"\n🔤 Translation Provider: {provider_info['provider']}")
-        if provider_info['provider'] == 'openai':
+        if provider_info["provider"] == "openai":
             click.echo(f"   Model: {provider_info['model']}")
-        
+
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
 
+
 @cli.command()
-@click.option('--config-file', default='channels.yml', help='Path to channels configuration file')
+@click.option(
+    "--config-file", default="channels.yml", help="Path to channels configuration file"
+)
 def validate(config_file):
     """Validate channel configuration"""
     try:
         channel_manager = ChannelManager(config_file)
         errors = channel_manager.validate_configuration()
-        
+
         if errors:
             click.echo("❌ Configuration errors found:")
             for error in errors:
@@ -287,36 +314,52 @@ def validate(config_file):
         else:
             click.echo("✅ Configuration is valid")
             channel_manager.print_summary()
-            
+
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
 
+
 @cli.command()
-@click.option('--config-file', default='channels.yml', help='Path to channels configuration file')
+@click.option(
+    "--config-file", default="channels.yml", help="Path to channels configuration file"
+)
 def list_channels(config_file):
     """List all configured channels"""
     try:
         channel_manager = ChannelManager(config_file)
         channel_pairs = channel_manager.get_channel_pairs()
-        
+
         click.echo("📋 Configured Channel Pairs:")
         click.echo("=" * 40)
-        
+
         for pair_name, pair_config in channel_pairs.items():
             click.echo(f"\n🔗 {pair_name}:")
-            click.echo(f"  Description: {pair_config.get('description', 'No description')}")
-            click.echo(f"  Input channels: {', '.join(pair_config.get('input_channels', []))}")
+            click.echo(
+                f"  Description: {pair_config.get('description', 'No description')}"
+            )
+            click.echo(
+                f"  Input channels: {', '.join(pair_config.get('input_channels', []))}"
+            )
             click.echo(f"  Output channel: {pair_config.get('output_channel')}")
-            click.echo(f"  Media types: {', '.join(pair_config.get('media_types', []))}")
-            click.echo(f"  Translation: {'Yes' if pair_config.get('translation') else 'No'}")
-            click.echo(f"  Persistence: {'Yes' if pair_config.get('persistence') else 'No'}")
-            
+            click.echo(
+                f"  Media types: {', '.join(pair_config.get('media_types', []))}"
+            )
+            click.echo(
+                f"  Translation: {'Yes' if pair_config.get('translation') else 'No'}"
+            )
+            click.echo(
+                f"  Persistence: {'Yes' if pair_config.get('persistence') else 'No'}"
+            )
+
             # Show content filtering prompt if available
-            if pair_config.get('content_filter_prompt'):
-                click.echo(f"  Content filter: {pair_config['content_filter_prompt'][:50]}...")
-            
+            if pair_config.get("content_filter_prompt"):
+                click.echo(
+                    f"  Content filter: {pair_config['content_filter_prompt'][:50]}..."
+                )
+
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
+
 
 @cli.group()
 def digest():
@@ -339,9 +382,7 @@ def digest_ingest(podcast_name, date):
     try:
         parsed_date = dt.strptime(date, "%Y-%m-%d")
     except ValueError as error:
-        raise click.ClickException(
-            "Date must use YYYY-MM-DD format"
-        ) from error
+        raise click.ClickException("Date must use YYYY-MM-DD format") from error
     if parsed_date.strftime("%Y-%m-%d") != date:
         raise click.ClickException("Date must use YYYY-MM-DD format")
 
@@ -349,8 +390,7 @@ def digest_ingest(podcast_name, date):
     podcasts = config_mgr.resolve_podcast_configs()
     if podcast_name not in podcasts:
         raise click.ClickException(
-            f"Unknown podcast '{podcast_name}'. "
-            f"Available: {list(podcasts.keys())}"
+            f"Unknown podcast '{podcast_name}'. Available: {list(podcasts.keys())}"
         )
     if podcasts[podcast_name].get("input_mode") != "external_script":
         raise click.ClickException(
@@ -382,8 +422,12 @@ def digest_ingest(podcast_name, date):
 
 
 @digest.command(name="run")
-@click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
-@click.option("--podcast", "podcast_name", default=None, help="Podcast name (runs all if omitted)")
+@click.option(
+    "--date", default=None, help="Target date (YYYY-MM-DD), defaults to today"
+)
+@click.option(
+    "--podcast", "podcast_name", default=None, help="Podcast name (runs all if omitted)"
+)
 @click.option("--no-cache", is_flag=True, help="Bypass LLM and TTS cache")
 def digest_run(date, podcast_name, no_cache):
     """Run the full digest pipeline: collect, summarize, podcast."""
@@ -399,7 +443,9 @@ def digest_run(date, podcast_name, no_cache):
             for source, summary in result.get("source_summaries", {}).items():
                 click.echo(f"  {source}: {len(summary)} chars")
             if result.get("executive_summary"):
-                click.echo(f"  Executive summary: {len(result['executive_summary'])} chars")
+                click.echo(
+                    f"  Executive summary: {len(result['executive_summary'])} chars"
+                )
             if result.get("audio_path"):
                 click.echo(f"  Audio: {result['audio_path']}")
 
@@ -407,8 +453,15 @@ def digest_run(date, podcast_name, no_cache):
 
 
 @digest.command(name="collect")
-@click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
-@click.option("--podcast", "podcast_name", default=None, help="Podcast name (collects all sources if omitted)")
+@click.option(
+    "--date", default=None, help="Target date (YYYY-MM-DD), defaults to today"
+)
+@click.option(
+    "--podcast",
+    "podcast_name",
+    default=None,
+    help="Podcast name (collects all sources if omitted)",
+)
 def digest_collect(date, podcast_name):
     """Collect content from Telegram channels and web sources."""
     from telegram_translator.digest import DigestPipeline
@@ -423,8 +476,15 @@ def digest_collect(date, podcast_name):
 
 
 @digest.command(name="summarize")
-@click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
-@click.option("--podcast", "podcast_name", default=None, help="Podcast name (summarizes all if omitted)")
+@click.option(
+    "--date", default=None, help="Target date (YYYY-MM-DD), defaults to today"
+)
+@click.option(
+    "--podcast",
+    "podcast_name",
+    default=None,
+    help="Podcast name (summarizes all if omitted)",
+)
 @click.option("--no-cache", is_flag=True, help="Bypass LLM cache")
 def digest_summarize(date, podcast_name, no_cache):
     """Generate summaries and podcast script from collected content."""
@@ -446,8 +506,15 @@ def digest_summarize(date, podcast_name, no_cache):
 
 
 @digest.command(name="podcast")
-@click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
-@click.option("--podcast", "podcast_name", default=None, help="Podcast name (generates all if omitted)")
+@click.option(
+    "--date", default=None, help="Target date (YYYY-MM-DD), defaults to today"
+)
+@click.option(
+    "--podcast",
+    "podcast_name",
+    default=None,
+    help="Podcast name (generates all if omitted)",
+)
 @click.option("--no-cache", is_flag=True, help="Bypass TTS segment cache")
 def digest_podcast(date, podcast_name, no_cache):
     """Generate podcast audio from an existing script."""
@@ -464,8 +531,15 @@ def digest_podcast(date, podcast_name, no_cache):
 
 
 @digest.command(name="status")
-@click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
-@click.option("--podcast", "podcast_name", default=None, help="Podcast name (shows all if omitted)")
+@click.option(
+    "--date", default=None, help="Target date (YYYY-MM-DD), defaults to today"
+)
+@click.option(
+    "--podcast",
+    "podcast_name",
+    default=None,
+    help="Podcast name (shows all if omitted)",
+)
 def digest_status(date, podcast_name):
     """Show the status of a digest."""
     from datetime import datetime as dt, timezone
@@ -481,10 +555,7 @@ def digest_status(date, podcast_name):
         digests = [store.get_digest(target_date, podcast_name)]
         digests = [d for d in digests if d]
     else:
-        digests = [
-            d for d in store.list_digests(100)
-            if d.date == target_date
-        ]
+        digests = [d for d in store.list_digests(100) if d.date == target_date]
 
     if not digests:
         click.echo(f"No digests found for {target_date}")
@@ -553,12 +624,11 @@ def digest_podcasts():
         click.echo(f"    Voice: {voice}, Sources: {', '.join(sources)}")
         if dest_name:
             slug_display = (
-                f" slug='{slug}'" if slug not in (None, "") else
-                " slug='' (root-mounted)" if slug == "" else ""
+                f" slug='{slug}'"
+                if slug not in (None, "")
+                else " slug='' (root-mounted)" if slug == "" else ""
             )
-            click.echo(
-                f"    Destination: {dest_name} ({dest_type}){slug_display}"
-            )
+            click.echo(f"    Destination: {dest_name} ({dest_type}){slug_display}")
 
 
 @digest.group(name="cache")
@@ -583,6 +653,7 @@ def digest_cache_clear():
     tts_dir = Path(".cache/tts")
     if tts_dir.exists():
         import shutil
+
         file_count = sum(1 for _ in tts_dir.glob("*.wav"))
         shutil.rmtree(tts_dir)
         click.echo(f"Cleared {file_count} TTS cache files")
@@ -628,8 +699,15 @@ def _group_touched_destinations(
 
 
 @digest.command(name="publish")
-@click.option("--date", default=None, help="Target date (YYYY-MM-DD), defaults to today")
-@click.option("--podcast", "podcast_name", default=None, help="Podcast name (publishes all if omitted)")
+@click.option(
+    "--date", default=None, help="Target date (YYYY-MM-DD), defaults to today"
+)
+@click.option(
+    "--podcast",
+    "podcast_name",
+    default=None,
+    help="Podcast name (publishes all if omitted)",
+)
 def digest_publish(date, podcast_name):
     """Encode M4A, rebuild RSS feed, and deploy."""
     from telegram_translator.publisher import PodcastPublisher
@@ -638,6 +716,7 @@ def digest_publish(date, podcast_name):
         config_mgr = ConfigManager()
         db_path = config_mgr.get_database_path("content_store.db")
         from telegram_translator.content_store import ContentStore
+
         store = ContentStore(db_path)
 
         all_podcasts = config_mgr.resolve_podcast_configs()
@@ -659,9 +738,7 @@ def digest_publish(date, podcast_name):
 
         # Destination-level: rebuild site index + run destination sync
         # exactly once per destination touched by this run.
-        groups = _group_touched_destinations(
-            targets, all_podcasts, destinations
-        )
+        groups = _group_touched_destinations(targets, all_podcasts, destinations)
         for dest_name, dest_podcasts in groups.items():
             dest_cfg = destinations[dest_name]
             if dest_cfg.get("type") == "static":
@@ -685,15 +762,18 @@ def digest_publish(date, podcast_name):
             if ok:
                 click.echo(f"Sync complete: {dest_name}")
             else:
-                raise click.ClickException(
-                    f"Sync failed: {dest_name}"
-                )
+                raise click.ClickException(f"Sync failed: {dest_name}")
 
     asyncio.run(_run())
 
 
 @digest.command(name="feed")
-@click.option("--podcast", "podcast_name", default=None, help="Podcast name (rebuilds all if omitted)")
+@click.option(
+    "--podcast",
+    "podcast_name",
+    default=None,
+    help="Podcast name (rebuilds all if omitted)",
+)
 def digest_feed(podcast_name):
     """Rebuild RSS feed only (no encoding or sync)."""
     from telegram_translator.publisher import PodcastPublisher
@@ -701,6 +781,7 @@ def digest_feed(podcast_name):
     config_mgr = ConfigManager()
     db_path = config_mgr.get_database_path("content_store.db")
     from telegram_translator.content_store import ContentStore
+
     store = ContentStore(db_path)
 
     all_podcasts = config_mgr.resolve_podcast_configs()
@@ -716,23 +797,17 @@ def digest_feed(podcast_name):
         targets = all_podcasts
 
     for pname, pcfg in targets.items():
-        if pcfg.get("destination_type") in {
-            "astro_collection", "wordpress"
-        }:
+        if pcfg.get("destination_type") in {"astro_collection", "wordpress"}:
             # These destinations do not use telegram_translator's static RSS
             # generator. Astro builds its own feed; WordPress owns its feed.
-            click.echo(
-                f"Skipped ({pcfg.get('destination_type')}): {pname}"
-            )
+            click.echo(f"Skipped ({pcfg.get('destination_type')}): {pname}")
             continue
         publisher = PodcastPublisher(pcfg, store)
         feed_path = publisher.rebuild_feed(pname)
         click.echo(f"Feed rebuilt: {pname} -> {feed_path}")
 
     # Rebuild site index for any static destination touched by this run.
-    groups = _group_touched_destinations(
-        targets, all_podcasts, destinations
-    )
+    groups = _group_touched_destinations(targets, all_podcasts, destinations)
     for dest_name, dest_podcasts in groups.items():
         dest_cfg = destinations[dest_name]
         if dest_cfg.get("type") != "static":
@@ -758,6 +833,7 @@ def digest_site(destination_name):
     config_mgr = ConfigManager()
     db_path = config_mgr.get_database_path("content_store.db")
     from telegram_translator.content_store import ContentStore
+
     store = ContentStore(db_path)
 
     destinations = config_mgr.resolve_destinations()
@@ -775,9 +851,7 @@ def digest_site(destination_name):
 
     for dest_name, dest_cfg in target_dests.items():
         if dest_cfg.get("type") != "static":
-            click.echo(
-                f"Skipped (non-static): {dest_name}"
-            )
+            click.echo(f"Skipped (non-static): {dest_name}")
             continue
         dest_podcasts = groups.get(dest_name, [])
         if not dest_podcasts:
@@ -789,10 +863,8 @@ def digest_site(destination_name):
         if index_path:
             click.echo(f"Site index: {dest_name} -> {index_path}")
         else:
-            click.echo(
-                f"Skipped (single root-mounted podcast): {dest_name}"
-            )
+            click.echo(f"Skipped (single root-mounted podcast): {dest_name}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     cli()

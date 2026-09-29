@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 # ``по-русски``, ``2026-04-11``, ``что-что``, ``AI-фигня``.
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 
-_RU_CLITIC_RE = re.compile(
-    r"([а-яёА-ЯЁ])-(то|нибудь|либо|ка|таки)\b"
-)
+_RU_CLITIC_RE = re.compile(r"([а-яёА-ЯЁ])-(то|нибудь|либо|ка|таки)\b")
 
 # NGINX's canonical spoken form is "Engine X".  Keep the readable script and
 # literal commands untouched, but normalize the text handed to English TTS so
@@ -69,9 +67,7 @@ def _word_error_rate(reference: list[str], hypothesis: list[str]) -> float:
     """
     if not reference:
         return 0.0 if not hypothesis else 1.0
-    matcher = difflib.SequenceMatcher(
-        a=reference, b=hypothesis, autojunk=False
-    )
+    matcher = difflib.SequenceMatcher(a=reference, b=hypothesis, autojunk=False)
     errors = 0
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag != "equal":
@@ -374,9 +370,7 @@ class PodcastGenerator:
         """
         self.tts_cache_dir = tts_cache_dir if not no_cache else None
         self.podcast_name = config.get("name", "_default")
-        self.voicebox_url = config.get(
-            "voicebox_url", "http://localhost:17493"
-        )
+        self.voicebox_url = config.get("voicebox_url", "http://localhost:17493")
         self.voice_profile_name = config.get("voice_profile", "default")
         voice_instruct = config.get("voice_instruct")
         if voice_instruct is not None:
@@ -394,9 +388,7 @@ class PodcastGenerator:
         # Audio asset paths and mixing parameters
         audio = config.get("audio", {})
         default_assets = Path(__file__).resolve().parent.parent / "podcasts" / "assets"
-        self.whoosh_path = Path(
-            audio.get("whoosh", default_assets / "whoosh.wav")
-        )
+        self.whoosh_path = Path(audio.get("whoosh", default_assets / "whoosh.wav"))
         self.intro_bed_path = Path(
             audio.get("intro_bed", default_assets / "news_bed.wav")
         )
@@ -406,12 +398,8 @@ class PodcastGenerator:
         self.lead_in_seconds = float(audio.get("lead_in_seconds", 4.0))
         self.intro_fade_seconds = float(audio.get("intro_fade_seconds", 2.0))
         self.intro_bed_volume = float(audio.get("intro_bed_volume", 0.7))
-        self.background_bed_volume = float(
-            audio.get("background_bed_volume", 0.08)
-        )
-        self.background_fade_seconds = float(
-            audio.get("background_fade_seconds", 3.0)
-        )
+        self.background_bed_volume = float(audio.get("background_bed_volume", 0.08))
+        self.background_fade_seconds = float(audio.get("background_fade_seconds", 3.0))
         self.background_bed_start_after_intro = bool(
             audio.get("background_bed_start_after_intro", False)
         )
@@ -464,17 +452,13 @@ class PodcastGenerator:
             n = int(sample_rate * 0.5)
             return b"\x00\x00" * n
 
-        whoosh_samples = _load_audio_asset(
-            self.whoosh_path, target_rate=sample_rate
-        )
+        whoosh_samples = _load_audio_asset(self.whoosh_path, target_rate=sample_rate)
         pause_n = int(sample_rate * self.pause_ms / 2 / 1000)
         silence = [0] * pause_n
         all_samples = silence + whoosh_samples + silence
         return struct.pack(f"<{len(all_samples)}h", *all_samples)
 
-    def _load_intro_bed(
-        self, target_samples: int, sample_rate: int
-    ) -> list[int]:
+    def _load_intro_bed(self, target_samples: int, sample_rate: int) -> list[int]:
         """Load the intro bed asset, apply volume and fade-out.
 
         Args:
@@ -487,9 +471,7 @@ class PodcastGenerator:
         if not self.intro_bed_path.exists():
             return [0] * target_samples
 
-        bed_raw = _load_audio_asset(
-            self.intro_bed_path, target_rate=sample_rate
-        )
+        bed_raw = _load_audio_asset(self.intro_bed_path, target_rate=sample_rate)
 
         fade_samples = int(sample_rate * self.intro_fade_seconds)
         for i in range(len(bed_raw)):
@@ -526,9 +508,7 @@ class PodcastGenerator:
         if not self.background_bed_path.exists() or content_samples == 0:
             return [0] * target_samples
 
-        clip = _load_audio_asset(
-            self.background_bed_path, target_rate=sample_rate
-        )
+        clip = _load_audio_asset(self.background_bed_path, target_rate=sample_rate)
         if not clip:
             return [0] * target_samples
 
@@ -550,9 +530,7 @@ class PodcastGenerator:
                     fade_out = (cf_len - j) / cf_len
                     fade_in = j / cf_len
                     idx = len(looped) - cf_len + j
-                    looped[idx] = int(
-                        looped[idx] * fade_out + clip[j] * fade_in
-                    )
+                    looped[idx] = int(looped[idx] * fade_out + clip[j] * fade_in)
                 looped.extend(clip[cf_len:])
             else:
                 looped.extend(clip)
@@ -599,9 +577,7 @@ class PodcastGenerator:
             ) as temp_dir:
                 normalized_paths = []
                 for index, wav_path in enumerate(wav_paths):
-                    normalized_path = Path(temp_dir) / (
-                        f"{index:03d}-{wav_path.name}"
-                    )
+                    normalized_path = Path(temp_dir) / (f"{index:03d}-{wav_path.name}")
                     normalize_wav(
                         wav_path,
                         normalized_path,
@@ -648,9 +624,7 @@ class PodcastGenerator:
                 continue
 
             next_idx = i + 1
-            is_signature_pause = (
-                self.background_bed_start_after_intro and next_idx == 1
-            )
+            is_signature_pause = self.background_bed_start_after_intro and next_idx == 1
             if is_signature_pause:
                 voice_frames.extend(brief_silence)
             elif topic_boundaries is None or next_idx in topic_boundaries:
@@ -664,17 +638,13 @@ class PodcastGenerator:
         voice_frames = bytearray(lead_in_bytes) + voice_frames
 
         # Load and mix audio beds
-        total_samples = len(voice_frames) // (
-            params.sampwidth * params.nchannels
-        )
+        total_samples = len(voice_frames) // (params.sampwidth * params.nchannels)
         intro_bed = self._load_intro_bed(total_samples, sample_rate)
         background_start_sample = 0
         if self.background_bed_start_after_intro:
             background_start_sample = min(
                 total_samples,
-                lead_in_samples
-                + first_segment_samples
-                + brief_silence_samples,
+                lead_in_samples + first_segment_samples + brief_silence_samples,
             )
         bg_bed = self._load_background_bed(
             total_samples,
@@ -682,9 +652,7 @@ class PodcastGenerator:
             start_sample=background_start_sample,
         )
 
-        voice_ints = struct.unpack(
-            f"<{total_samples}h", bytes(voice_frames)
-        )
+        voice_ints = struct.unpack(f"<{total_samples}h", bytes(voice_frames))
         mixed = []
         for v, ib, bb in zip(voice_ints, intro_bed, bg_bed):
             s = max(-32767, min(32767, v + ib + bb))
@@ -762,9 +730,7 @@ class PodcastGenerator:
             attempt += 1
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
-                    response = await client.get(
-                        f"{self.voicebox_url}/profiles"
-                    )
+                    response = await client.get(f"{self.voicebox_url}/profiles")
                     response.raise_for_status()
                     return response.json()
             except httpx.HTTPError as exc:
@@ -983,13 +949,11 @@ class PodcastGenerator:
                         text,
                     )
                     raise RuntimeError(
-                        f"Voicebox generation failed for {label}: "
-                        f"HTTP {status}: {body}"
+                        f"Voicebox generation failed for {label}: HTTP {status}: {body}"
                     )
                 last_error = e
                 logger.warning(
-                    "Voicebox %d on %s (attempt %d/%d, %.1fs elapsed); "
-                    "retrying: %r",
+                    "Voicebox %d on %s (attempt %d/%d, %.1fs elapsed); retrying: %r",
                     status,
                     label,
                     attempt,
@@ -1001,8 +965,7 @@ class PodcastGenerator:
                 # Timeout / connection error — transient by nature.
                 last_error = e
                 logger.warning(
-                    "Voicebox %s on %s (attempt %d/%d, %.1fs elapsed); "
-                    "retrying: %r",
+                    "Voicebox %s on %s (attempt %d/%d, %.1fs elapsed); retrying: %r",
                     type(e).__name__,
                     label,
                     attempt,
@@ -1071,9 +1034,7 @@ class PodcastGenerator:
         for i, segment_text in enumerate(segments):
             segment_path = segment_dir / f"segment_{i:03d}.wav"
             seg_started = time.monotonic()
-            await self.generate_segment(
-                segment_text, segment_path, segment_index=i
-            )
+            await self.generate_segment(segment_text, segment_path, segment_index=i)
             segment_paths.append(segment_path)
             logger.info(
                 "Generated segment %d/%d in %.1fs",
@@ -1085,9 +1046,7 @@ class PodcastGenerator:
         # Output filename includes podcast name
         filename = f"{self.podcast_name}_{date}.wav"
         output_path = self.output_dir / filename
-        self.assemble_podcast(
-            segment_paths, output_path, topic_boundaries
-        )
+        self.assemble_podcast(segment_paths, output_path, topic_boundaries)
 
         for p in segment_paths:
             p.unlink(missing_ok=True)

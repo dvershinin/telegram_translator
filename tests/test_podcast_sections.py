@@ -43,22 +43,26 @@ class TestParseStructuredSections:
 
     def test_basic_sections(self):
         """Sections with topics produce correct boundaries."""
-        script = _make_script([
-            {"topic": None, "text": "Hello and welcome."},
-            {"topic": "War", "text": "Fighting continued today."},
-            {"topic": "Economy", "text": "Markets rose sharply."},
-            {"topic": None, "text": "That wraps up today."},
-        ])
+        script = _make_script(
+            [
+                {"topic": None, "text": "Hello and welcome."},
+                {"topic": "War", "text": "Fighting continued today."},
+                {"topic": "Economy", "text": "Markets rose sharply."},
+                {"topic": None, "text": "That wraps up today."},
+            ]
+        )
         segments, boundaries = parse_structured_sections(script)
         assert len(segments) == 4
         assert boundaries == {1, 2}
 
     def test_topic_text_excluded_from_segments(self):
         """Topic names never appear in the segment text sent to TTS."""
-        script = _make_script([
-            {"topic": None, "text": "Welcome."},
-            {"topic": "Ukraine Conflict", "text": "Intense fighting."},
-        ])
+        script = _make_script(
+            [
+                {"topic": None, "text": "Welcome."},
+                {"topic": "Ukraine Conflict", "text": "Intense fighting."},
+            ]
+        )
         segments, _ = parse_structured_sections(script)
         for seg in segments:
             assert "Ukraine Conflict" not in seg
@@ -66,11 +70,13 @@ class TestParseStructuredSections:
 
     def test_empty_text_skipped(self):
         """Sections with empty text are skipped entirely."""
-        script = _make_script([
-            {"topic": None, "text": "Hello."},
-            {"topic": "Empty", "text": ""},
-            {"topic": "Real", "text": "Content here."},
-        ])
+        script = _make_script(
+            [
+                {"topic": None, "text": "Hello."},
+                {"topic": "Empty", "text": ""},
+                {"topic": "Real", "text": "Content here."},
+            ]
+        )
         segments, boundaries = parse_structured_sections(script)
         assert len(segments) == 2
         assert segments == ["Hello.", "Content here."]
@@ -80,12 +86,15 @@ class TestParseStructuredSections:
     def test_long_section_splits(self):
         """Long section text is split into multiple TTS segments."""
         long_text = ". ".join(["This is a sentence"] * 50) + "."
-        script = _make_script([
-            {"topic": None, "text": "Intro."},
-            {"topic": "Big Topic", "text": long_text},
-        ])
+        script = _make_script(
+            [
+                {"topic": None, "text": "Intro."},
+                {"topic": "Big Topic", "text": long_text},
+            ]
+        )
         segments, boundaries = parse_structured_sections(
-            script, max_chars=200,
+            script,
+            max_chars=200,
         )
         assert len(segments) > 2
         # Topic boundary marks the first segment of "Big Topic"
@@ -93,19 +102,23 @@ class TestParseStructuredSections:
 
     def test_no_topics_no_boundaries(self):
         """Script with all null topics produces no boundaries."""
-        script = _make_script([
-            {"topic": None, "text": "Just talking."},
-            {"topic": None, "text": "Still talking."},
-        ])
+        script = _make_script(
+            [
+                {"topic": None, "text": "Just talking."},
+                {"topic": None, "text": "Still talking."},
+            ]
+        )
         segments, boundaries = parse_structured_sections(script)
         assert len(segments) == 2
         assert boundaries == set()
 
     def test_single_section(self):
         """Single section works without errors."""
-        script = _make_script([
-            {"topic": None, "text": "One section only."},
-        ])
+        script = _make_script(
+            [
+                {"topic": None, "text": "One section only."},
+            ]
+        )
         segments, boundaries = parse_structured_sections(script)
         assert segments == ["One section only."]
         assert boundaries == set()
@@ -116,11 +129,13 @@ class TestSectionsToReadable:
 
     def test_readable_output(self):
         """Readable text includes topic headers in brackets."""
-        script = _make_script([
-            {"topic": None, "text": "Hello everyone."},
-            {"topic": "War", "text": "Fighting today."},
-            {"topic": None, "text": "Goodbye."},
-        ])
+        script = _make_script(
+            [
+                {"topic": None, "text": "Hello everyone."},
+                {"topic": "War", "text": "Fighting today."},
+                {"topic": None, "text": "Goodbye."},
+            ]
+        )
         result = sections_to_readable(script)
         assert "[War]" in result
         assert "Hello everyone." in result
@@ -171,7 +186,8 @@ class TestTTSPreparation:
 
 
 def _make_show_notes(
-    lead: str, topics: list[dict],
+    lead: str,
+    topics: list[dict],
 ) -> dict:
     """Build a parsed show-notes dict for renderer tests."""
     return {"lead": lead, "topics": topics}
@@ -247,12 +263,14 @@ class TestShowNotesRendering:
         long_lead = (
             "Первое предложение про новости. "
             "Второе предложение про ещё что-то. "
-            "Третье предложение, тоже важное. "
-            + ("Дополнительный текст. " * 30)
+            "Третье предложение, тоже важное. " + ("Дополнительный текст. " * 30)
         )
-        desc = render_description(long_lead := _make_show_notes(
-            long_lead, [],
-        ))
+        desc = render_description(
+            long_lead := _make_show_notes(
+                long_lead,
+                [],
+            )
+        )
         assert len(desc) <= 260
         assert desc[-1] in (".", "!", "?", "…")
 
@@ -268,15 +286,21 @@ class TestShowNotesRendering:
         sn = _make_show_notes(
             "Lead text.",
             [
-                {"headline": "Тема А",
-                 "paragraph": "Параграф А.",
-                 "verdict": "Коротко А."},
-                {"headline": "Тема Б",
-                 "paragraph": "Параграф Б.",
-                 "verdict": "Коротко Б."},
-                {"headline": "Тема В",
-                 "paragraph": "Параграф В.",
-                 "verdict": "Коротко В."},
+                {
+                    "headline": "Тема А",
+                    "paragraph": "Параграф А.",
+                    "verdict": "Коротко А.",
+                },
+                {
+                    "headline": "Тема Б",
+                    "paragraph": "Параграф Б.",
+                    "verdict": "Коротко Б.",
+                },
+                {
+                    "headline": "Тема В",
+                    "paragraph": "Параграф В.",
+                    "verdict": "Коротко В.",
+                },
             ],
         )
         body = render_body(sn, _VASKE_VERDICT)
@@ -297,25 +321,29 @@ class TestShowNotesRendering:
         sn = _make_show_notes(
             "Lead.",
             [
-                {"headline": "Headline",
-                 "paragraph": "Plain factual paragraph.",
-                 "verdict": "Short verdict."},
+                {
+                    "headline": "Headline",
+                    "paragraph": "Plain factual paragraph.",
+                    "verdict": "Short verdict.",
+                },
             ],
         )
         body = render_body(sn, _VASKE_VERDICT)
         for marker in _SCAFFOLDING_MARKERS:
-            assert marker not in body, (
-                f"scaffolding marker leaked into body: {marker!r}"
-            )
+            assert (
+                marker not in body
+            ), f"scaffolding marker leaked into body: {marker!r}"
 
     def test_body_no_channel_attribution_in_render(self):
         """Renderer never emits source-channel attribution from clean input."""
         sn = _make_show_notes(
             "Lead.",
             [
-                {"headline": "Headline",
-                 "paragraph": "Factual paragraph in the host's voice.",
-                 "verdict": "Short verdict."},
+                {
+                    "headline": "Headline",
+                    "paragraph": "Factual paragraph in the host's voice.",
+                    "verdict": "Short verdict.",
+                },
             ],
         )
         body = render_body(sn, _VASKE_VERDICT)
@@ -334,26 +362,26 @@ class TestShowNotesRendering:
         with pytest.raises(ValueError):
             parse_show_notes('{"lead": "x"}')  # missing topics
         with pytest.raises(ValueError):
-            parse_show_notes(
-                '{"lead": "x", "topics": [{"headline": "h"}]}'
-            )
+            parse_show_notes('{"lead": "x", "topics": [{"headline": "h"}]}')
         with pytest.raises(ValueError):
             parse_show_notes("not json at all")
 
     def test_parse_show_notes_strips_whitespace(self):
         """Valid JSON parses to a normalized dict."""
-        raw = json.dumps({
-            "lead": "  Lead.  ",
-            "topics": [
-                {"headline": "  H  ",
-                 "paragraph": "  P  ",
-                 "verdict": "  V  "},
-            ],
-        })
+        raw = json.dumps(
+            {
+                "lead": "  Lead.  ",
+                "topics": [
+                    {"headline": "  H  ", "paragraph": "  P  ", "verdict": "  V  "},
+                ],
+            }
+        )
         result = parse_show_notes(raw)
         assert result["lead"] == "Lead."
         assert result["topics"][0] == {
-            "headline": "H", "paragraph": "P", "verdict": "V",
+            "headline": "H",
+            "paragraph": "P",
+            "verdict": "V",
         }
 
 
@@ -383,17 +411,21 @@ class TestSourceLeakPrevention:
             return "fake summary"
 
         with patch.object(
-            summarizer, "_chat", side_effect=fake_chat,
+            summarizer,
+            "_chat",
+            side_effect=fake_chat,
         ):
-            asyncio.run(summarizer.executive_summary(
-                {
-                    "naebnet": "Per-source summary one.",
-                    "another_channel": "Per-source summary two.",
-                },
-                source_biases={
-                    "naebnet": "edgy Russian commentary",
-                },
-            ))
+            asyncio.run(
+                summarizer.executive_summary(
+                    {
+                        "naebnet": "Per-source summary one.",
+                        "another_channel": "Per-source summary two.",
+                    },
+                    source_biases={
+                        "naebnet": "edgy Russian commentary",
+                    },
+                )
+            )
 
         assert "naebnet" not in captured["user"]
         assert "another_channel" not in captured["user"]
@@ -429,7 +461,9 @@ class TestSourceLeakPrevention:
             )
         ]
         with patch.object(
-            summarizer, "_chat", new=AsyncMock(side_effect=fake_chat),
+            summarizer,
+            "_chat",
+            new=AsyncMock(side_effect=fake_chat),
         ):
             asyncio.run(summarizer.summarize_source(items, "naebnet"))
 

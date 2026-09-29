@@ -82,7 +82,9 @@ def _markdown_to_html(text: str) -> str:
             level = len(heading_match.group(1))
             content = heading_match.group(2)
             content = re.sub(
-                r"\*{1,3}(.+?)\*{1,3}", r"<strong>\1</strong>", content,
+                r"\*{1,3}(.+?)\*{1,3}",
+                r"<strong>\1</strong>",
+                content,
             )
             html_parts.append(f"<h{level}>{content}</h{level}>")
             continue
@@ -95,7 +97,9 @@ def _markdown_to_html(text: str) -> str:
                 in_list = True
             content = list_match.group(1)
             content = re.sub(
-                r"\*{1,3}(.+?)\*{1,3}", r"<strong>\1</strong>", content,
+                r"\*{1,3}(.+?)\*{1,3}",
+                r"<strong>\1</strong>",
+                content,
             )
             html_parts.append(f"<li>{content}</li>")
             continue
@@ -106,7 +110,9 @@ def _markdown_to_html(text: str) -> str:
 
         # Regular paragraph — convert bold
         para = re.sub(
-            r"\*{1,3}(.+?)\*{1,3}", r"<strong>\1</strong>", stripped,
+            r"\*{1,3}(.+?)\*{1,3}",
+            r"<strong>\1</strong>",
+            stripped,
         )
         html_parts.append(f"<p>{para}</p>")
 
@@ -172,15 +178,11 @@ def _validate_feed(rss: Element):
 
     # Episode-level required tags
     for i, item in enumerate(channel.findall("item")):
-        ep_title = (
-            item.findtext("title") or f"episode #{i + 1}"
-        )
+        ep_title = item.findtext("title") or f"episode #{i + 1}"
         for tag in _REQUIRED_EPISODE_TAGS:
             el = item.find(tag)
             if el is None:
-                errors.append(
-                    f"Episode '{ep_title}' missing required tag: <{tag}>"
-                )
+                errors.append(f"Episode '{ep_title}' missing required tag: <{tag}>")
 
         # Enclosure must have url, length, type
         enc = item.find("enclosure")
@@ -188,14 +190,11 @@ def _validate_feed(rss: Element):
             for attr in ("url", "length", "type"):
                 if not enc.get(attr):
                     errors.append(
-                        f"Episode '{ep_title}' <enclosure> "
-                        f"missing '{attr}' attribute"
+                        f"Episode '{ep_title}' <enclosure> missing '{attr}' attribute"
                     )
 
     if errors:
-        raise ValueError(
-            "Feed validation failed:\n  " + "\n  ".join(errors)
-        )
+        raise ValueError("Feed validation failed:\n  " + "\n  ".join(errors))
 
     logger.info("Feed validation passed")
 
@@ -250,9 +249,7 @@ class PodcastFeed:
             artwork_url or f"{self.base_url}/artwork.jpg"
         )
         self.explicit = explicit
-        self.feed_url = self._protect_url(
-            feed_url or f"{self.base_url}/feed.xml"
-        )
+        self.feed_url = self._protect_url(feed_url or f"{self.base_url}/feed.xml")
         self.copyright_text = copyright_text
         self.owner_name = owner_name
         self.owner_email = owner_email
@@ -287,9 +284,7 @@ class PodcastFeed:
 
         # --- Show-level required tags ---
         SubElement(channel, "title").text = self.title
-        SubElement(channel, "link").text = self._protect_url(
-            self.base_url + "/"
-        )
+        SubElement(channel, "link").text = self._protect_url(self.base_url + "/")
         SubElement(channel, "description").text = self.description
         SubElement(channel, "language").text = self.language
 
@@ -307,12 +302,8 @@ class PodcastFeed:
         )
 
         # --- Show-level recommended/optional tags ---
-        SubElement(
-            channel, f"{{{ITUNES_NS}}}author"
-        ).text = self.author
-        SubElement(
-            channel, f"{{{ITUNES_NS}}}type"
-        ).text = "episodic"
+        SubElement(channel, f"{{{ITUNES_NS}}}author").text = self.author
+        SubElement(channel, f"{{{ITUNES_NS}}}type").text = "episodic"
         SubElement(channel, "lastBuildDate").text = format_datetime(
             datetime.now(tz=timezone.utc)
         )
@@ -365,9 +356,7 @@ class PodcastFeed:
         xml_text = _inject_cdata(xml_text)
         output_path.write_text(xml_text, encoding="utf-8")
 
-        logger.info(
-            "Feed written: %s (%d episodes)", output_path, len(episodes)
-        )
+        logger.info("Feed written: %s (%d episodes)", output_path, len(episodes))
         return output_path
 
     def _add_episode(self, channel: Element, ep: dict):
@@ -387,9 +376,7 @@ class PodcastFeed:
             enclosure = SubElement(item, "enclosure")
             enclosure.set(
                 "url",
-                self._protect_url(
-                    f"{self.base_url}/episodes/{filename}"
-                ),
+                self._protect_url(f"{self.base_url}/episodes/{filename}"),
             )
             enclosure.set("type", "audio/x-m4a")
             enclosure.set("length", str(ep.get("file_size", 0)))
@@ -402,9 +389,9 @@ class PodcastFeed:
         pub_date = ep.get("pub_date")
         if pub_date:
             if isinstance(pub_date, str):
-                dt = datetime.strptime(
-                    pub_date, "%Y-%m-%d"
-                ).replace(hour=12, tzinfo=timezone.utc)
+                dt = datetime.strptime(pub_date, "%Y-%m-%d").replace(
+                    hour=12, tzinfo=timezone.utc
+                )
             else:
                 dt = pub_date
             SubElement(item, "pubDate").text = format_datetime(dt)
@@ -416,9 +403,7 @@ class PodcastFeed:
             ep_html = _markdown_to_html(executive_summary)
         description = ep.get("description", "")
         if ep_html:
-            SubElement(item, "description").text = (
-                _CDATA_MARK + ep_html
-            )
+            SubElement(item, "description").text = _CDATA_MARK + ep_html
         elif description:
             SubElement(item, "description").text = description
 
@@ -426,9 +411,9 @@ class PodcastFeed:
         if duration:
             minutes, seconds = divmod(int(duration), 60)
             hours, minutes = divmod(minutes, 60)
-            SubElement(
-                item, f"{{{ITUNES_NS}}}duration"
-            ).text = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            SubElement(item, f"{{{ITUNES_NS}}}duration").text = (
+                f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            )
 
         ep_img = SubElement(item, f"{{{ITUNES_NS}}}image")
         ep_img.set("href", self.artwork_url)
@@ -438,26 +423,18 @@ class PodcastFeed:
         )
 
         if filename:
-            SubElement(
-                item, "link"
-            ).text = self._protect_url(
+            SubElement(item, "link").text = self._protect_url(
                 f"{self.base_url}/episodes/{filename}"
             )
 
         # --- Episode optional tags ---
-        SubElement(
-            item, f"{{{ITUNES_NS}}}episodeType"
-        ).text = "full"
+        SubElement(item, f"{{{ITUNES_NS}}}episodeType").text = "full"
 
         episode_number = ep.get("episode_number")
         if episode_number:
-            SubElement(
-                item, f"{{{ITUNES_NS}}}episode"
-            ).text = str(episode_number)
+            SubElement(item, f"{{{ITUNES_NS}}}episode").text = str(episode_number)
 
         # HTML show notes (also CDATA)
         if ep_html:
-            content_el = SubElement(
-                item, f"{{{CONTENT_NS}}}encoded"
-            )
+            content_el = SubElement(item, f"{{{CONTENT_NS}}}encoded")
             content_el.text = _CDATA_MARK + ep_html
