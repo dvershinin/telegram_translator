@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from appdirs import user_data_dir, user_config_dir
 
 from telegram_translator.llm_env import DEFAULT_ROLE
+from telegram_translator.session_safety import assert_isolated_telegram_session
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ class ConfigManager:
 
         # Use proper session path
         session_path = self.sessions_dir / session_name
+        assert_isolated_telegram_session(str(session_path))
 
         return {
             "api_id": int(api_id),

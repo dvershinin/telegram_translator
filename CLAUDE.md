@@ -279,6 +279,12 @@ This project uses its **own dedicated Telethon session**, separate from `~/Proje
 - After that, `digest collect` connects non-interactively via `client.connect()` + `is_user_authorized()`.
 - If session expires (Telegram revokes it), re-run `telegram-translator start` to re-authenticate.
 - Do NOT share session files between projects — Telethon locks the SQLite file and concurrent access causes disconnections.
+- A different filename does not isolate a copied authorization key. Credential
+  resolution compares the translator's key with TGP sessions using read-only
+  SQLite connections and refuses duplicates before constructing a client.
+  `TGP_SESSIONS_DIR` overrides the protected directory (default
+  `~/Projects/tgp/sessions`). Unreadable databases fail visibly. Repair a shared
+  login by authorizing a fresh session, never by copying or renaming it.
 
 ## LLM Prompt Guardrails
 
