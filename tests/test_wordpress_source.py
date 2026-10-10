@@ -3,8 +3,30 @@
 import asyncio
 
 import httpx
+import pytest
 
 from telegram_translator.web_scraper import WebScraper, _plain_text
+
+
+@pytest.mark.parametrize(
+    ("fragment", "expected"),
+    [
+        ("<h2>Fast NGINX</h2><p>Use a cache.</p>", "Fast NGINX Use a cache."),
+        (
+            "<p>Before.</p><table><tr><td>Hit rate</td><td>95%</td></tr></table>"
+            "<p>After.</p>",
+            "Before. Hit rate 95% After.",
+        ),
+        (
+            "<p>One<br>Two &amp; &#x3c;literal&#x3e;</p>"
+            "<script>alert(1)</script><style>.x{color:red}</style><!-- hidden -->",
+            "One Two & <literal>",
+        ),
+    ],
+)
+def test_wordpress_fragment_retains_all_visible_content(fragment, expected):
+    """Keep headings and tables while excluding non-content HTML bodies."""
+    assert _plain_text(fragment) == expected
 
 
 def test_plain_wordpress_text_skips_html_parser(monkeypatch):

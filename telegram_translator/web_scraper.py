@@ -6,6 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Optional
 from email.utils import parsedate_to_datetime
 
@@ -16,7 +17,33 @@ import trafilatura
 logger = logging.getLogger(__name__)
 
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+class _FragmentTextParser(HTMLParser):
+    """Retain fragment text without article-selection heuristics."""
+
+    def __init__(self) -> None:
+        """Initialize the text buffer and non-content nesting depth."""
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        """Separate tags and omit script and style bodies."""
+        if tag in {"script", "style"}:
+            self._ignored_depth += 1
+        if not self._ignored_depth:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        """Resume content after script and style bodies."""
+        if tag in {"script", "style"} and self._ignored_depth:
+            self._ignored_depth -= 1
+        if not self._ignored_depth:
+            self.parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        """Append visible fragment text."""
+        if not self._ignored_depth:
+            self.parts.append(data)
 
 
 def _plain_text(value: str) -> str:
@@ -26,14 +53,10 @@ def _plain_text(value: str) -> str:
         return ""
     if "<" not in value:
         return re.sub(r"\s+", " ", html.unescape(value)).strip()
-    extracted = trafilatura.extract(
-        value,
-        include_comments=False,
-        include_tables=False,
-    )
-    if extracted:
-        return extracted.strip()
-    return re.sub(r"\s+", " ", html.unescape(_HTML_TAG_RE.sub(" ", value))).strip()
+    parser = _FragmentTextParser()
+    parser.feed(value)
+    parser.close()
+    return re.sub(r"\s+", " ", "".join(parser.parts)).strip()
 
 
 def _normalized_title(value: str) -> str:
