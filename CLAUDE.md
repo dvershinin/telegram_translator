@@ -20,6 +20,7 @@ telegram_translator/
   content_store.py     — SQLite content index + digest records + LLM cache
   web_scraper.py       — RSS + trafilatura article extraction
   summarizer.py        — LLM summarization (OpenAI async, cached)
+  anthropic_chat.py    — Native Anthropic SDK path for Claude roles
   podcast_generator.py — Voicebox TTS + audio assembly (segment cache)
   audio_encoder.py     — WAV → M4A (AAC) encoding via pydub/ffmpeg
   feed_generator.py    — RSS 2.0 + iTunes namespace feed generation
@@ -230,6 +231,10 @@ The feed generator (`feed_generator.py`) targets Apple Podcasts spec compliance.
 - `publisher.py` generates `index.html` alongside `feed.xml` on every rebuild
 - Dark theme, mobile-friendly, inline audio player, collapsible show notes
 - Episode summaries converted from Markdown to HTML via `_markdown_to_html()`
+
+## LLM roles
+
+Podcasts name an env role (`llm_role:` in `config.yml`); the role's model, base URL and key come from `~/.secrets` (`telegram_translator/llm_env.py`). `crosswire`, `the_stack` and `scalable_stories` use the `podcast` role, which points at Claude (`claude-opus-5-5`) and is paid from the Claude Max plan's monthly API credit (switched 2026-10-11 from DeepSeek `writer`). A role whose model starts with `claude` goes through `anthropic_chat.py` (native SDK: `output_config.format` for structured output, `fallbacks="default"` for refusals, no `temperature`, `max_tokens` floored at 16000 because thinking shares it). `LLM_<ROLE>_EFFORT` sets effort. Claude calls are not in the llm-usage DeepSeek ledger; check spend on the Console Cost page. To roll back, set those podcasts' `llm_role` back to `writer`.
 
 ## Testing
 

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Optional
 
 import openai
 
+from telegram_translator import anthropic_chat
 from telegram_translator.content_store import ContentItem
 from telegram_translator.llm_env import (
     DEFAULT_ROLE,
@@ -75,9 +76,9 @@ _FACTUAL_ACCURACY_GUARDRAIL = (
 )
 
 
-# Structured-output schemas. Shared by the OpenAI `json_schema` path and the
-# DeepSeek strict tool-call path, so both providers are held to the exact same
-# contract instead of one of them getting a prose description of it.
+# Structured-output schemas. Shared by the Claude `output_config.format` path,
+# the OpenAI `json_schema` path and the DeepSeek strict tool-call path, so every
+# provider is held to the exact same contract instead of a prose description.
 PODCAST_SCRIPT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -168,8 +169,13 @@ class Summarizer:
         """
         # The model is NOT read from config: the podcast names an LLM role and
         # the role resolves from the environment. See telegram_translator.llm_env.
-        self.role = require_role(config.get("llm_role") or DEFAULT_ROLE)
+        role_name = config.get("llm_role") or DEFAULT_ROLE
+        self.role = require_role(role_name)
         self.uses_deepseek = is_deepseek(self.role.model)
+        self.uses_anthropic = anthropic_chat.is_anthropic(self.role.model)
+        self.effort = (
+            anthropic_chat.role_effort(role_name) if self.uses_anthropic else None
+        )
         self.default_model = self.role.model
         self.selection_model = self.role.model
         self.summarization_model = self.role.model
@@ -190,6 +196,10 @@ class Summarizer:
         )
 
         self.api_base = self.role.base_url
+        # Claude roles go through the native Anthropic SDK; see anthropic_chat.
+        self.anthropic_client = (
+            anthropic_chat.make_client(self.role) if self.uses_anthropic else None
+        )
         self.client = openai.AsyncOpenAI(
             api_key=self.role.api_key,
             base_url=self.role.base_url,
@@ -242,8 +252,9 @@ class Summarizer:
     ) -> str:
         """Request JSON constrained by ``schema`` and return it as a string.
 
-        Both providers are held to the same schema, by different mechanisms:
+        Every provider is held to the same schema, by different mechanisms:
 
+        * Claude takes ``output_config.format`` natively (``anthropic_chat``).
         * OpenAI accepts ``response_format: {"type": "json_schema", ...}``.
         * DeepSeek rejects that outright ("This response_format type is
           unavailable now") on both ``/v1`` and ``/beta``. Its only enforced
@@ -271,6 +282,18 @@ class Summarizer:
         Raises:
             ValueError: If the provider returns no usable structured payload.
         """
+        if self.anthropic_client is not None:
+            return await anthropic_chat.complete_json(
+                self.anthropic_client,
+                self.role,
+                system,
+                user,
+                schema,
+                max_tokens=max_tokens,
+                effort=self.effort,
+                label=schema_name,
+            )
+
         shared = dict(
             model=model,
             messages=[
@@ -401,6 +424,21 @@ class Summarizer:
                 logger.info("Cache hit for %s, skipping API call", stage)
                 return cached
 
+        stage = cache_key.split(":")[0] if cache_key else "uncached"
+        if self.anthropic_client is not None:
+            result = await anthropic_chat.complete_text(
+                self.anthropic_client,
+                self.role,
+                system,
+                user,
+                max_tokens=max_tokens,
+                effort=self.effort,
+                label=stage,
+            )
+            if cache_key and self.store:
+                self.store.set_llm_cache(cache_key, stage, result, use_model)
+            return result
+
         response = await self.client.chat.completions.create(
             model=use_model,
             messages=[
@@ -414,7 +452,6 @@ class Summarizer:
                 temperature=temperature,
             ),
         )
-        stage = cache_key.split(":")[0] if cache_key else "uncached"
         record_deepseek_usage(
             response,
             requested_model=use_model,

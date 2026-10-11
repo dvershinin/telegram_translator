@@ -21,7 +21,12 @@ from telegram_translator.llm_env import (
 PACKAGE_DIR = Path(__file__).resolve().parent.parent / "telegram_translator"
 
 # Source files that construct LLM requests.
-LLM_SOURCE_FILES = ("summarizer.py", "translation_manager.py", "config_manager.py")
+LLM_SOURCE_FILES = (
+    "summarizer.py",
+    "translation_manager.py",
+    "config_manager.py",
+    "anthropic_chat.py",
+)
 
 HARDCODED_MODEL_PATTERN = re.compile(
     r"""['"](?:gpt-[0-9]|deepseek-(?:chat|reasoner|v)|claude-|gemini-)[^'"]*['"]""",

@@ -26,6 +26,7 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
     "openai>=1.0.0",
+    "anthropic>=1.13",
     "appdirs>=1.4.4",
     "click>=8.1.0",
     "feedparser>=6.0",
