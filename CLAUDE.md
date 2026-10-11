@@ -236,6 +236,8 @@ The feed generator (`feed_generator.py`) targets Apple Podcasts spec compliance.
 
 Podcasts name an env role (`llm_role:` in `config.yml`); the role's model, base URL and key come from `~/.secrets` (`telegram_translator/llm_env.py`). `crosswire`, `the_stack` and `scalable_stories` use the `podcast` role, which points at Claude (`claude-opus-5-5`) and is paid from the Claude Max plan's monthly API credit (switched 2026-10-11 from DeepSeek `writer`). A role whose model starts with `claude` goes through `anthropic_chat.py` (native SDK: `output_config.format` for structured output, `fallbacks="default"` for refusals, no `temperature`, `max_tokens` floored at 16000 because thinking shares it). `LLM_<ROLE>_EFFORT` sets effort. Claude calls are not in the llm-usage DeepSeek ledger; check spend on the Console Cost page. To roll back, set those podcasts' `llm_role` back to `writer`.
 
+To preview a script without touching production or running TTS, there is no `--dry-run` flag: copy `~/Library/Application Support/telegram_translator/databases/content_store.db` to a scratch dir, delete that date's `digest_content_items` and `digests` rows for the podcast in the copy (published items are otherwise excluded as used), then run `DigestPipeline(cm, podcast_name=...).summarize(date=..., no_cache=True)` with `cm = ConfigManager(); cm.databases_dir = Path(scratch)` after `source ~/.secrets`. One Crosswire run on Claude took ~3.5 min and cost ~$0.6.
+
 ## Testing
 
 Black 26.5.1 is the sole Python formatter (88 columns, Python 3.12); its exact
