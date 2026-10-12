@@ -236,6 +236,62 @@ async def test_generate_segment_forwards_voice_instruction(monkeypatch, tmp_path
     assert client.payload["instruct"] == instruction
 
 
+@pytest.mark.asyncio
+async def test_generate_segment_forwards_model_size(monkeypatch, tmp_path):
+    """A podcast pinned to bf16 must ask Voicebox for it on every segment."""
+    generator = PodcastGenerator(
+        {
+            "name": "test",
+            "voicebox_url": "http://localhost:17493",
+            "voice_profile": "profile-id",
+            "voice_model_size": "1.7B-bf16",
+            "output_dir": str(tmp_path),
+        }
+    )
+    generator._profile_id = "profile-id"
+    client = _GenerationClient()
+    monkeypatch.setattr(
+        podcast_generator.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    await generator.generate_segment("Hello.", tmp_path / "segment.wav")
+
+    assert client.payload["model_size"] == "1.7B-bf16"
+
+
+@pytest.mark.asyncio
+async def test_generate_segment_omits_model_size_by_default(monkeypatch, tmp_path):
+    """Unpinned podcasts keep the Voicebox service default (8bit)."""
+    generator = PodcastGenerator(
+        {
+            "name": "test",
+            "voicebox_url": "http://localhost:17493",
+            "voice_profile": "profile-id",
+            "output_dir": str(tmp_path),
+        }
+    )
+    generator._profile_id = "profile-id"
+    client = _GenerationClient()
+    monkeypatch.setattr(
+        podcast_generator.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    await generator.generate_segment("Hello.", tmp_path / "segment.wav")
+
+    assert "model_size" not in client.payload
+
+
+def test_unknown_model_size_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="voice_model_size"):
+        PodcastGenerator(
+            {"name": "test", "voice_model_size": "bf16", "output_dir": str(tmp_path)}
+        )
+
+
 class _FlakyGenerationClient:
     """Fail the POST ``fail_times`` times, then succeed.
 
@@ -380,3 +436,19 @@ def test_voice_instruction_participates_in_tts_cache_key(tmp_path):
     )
 
     assert plain._tts_cache_path("Hello.") != directed._tts_cache_path("Hello.")
+
+
+def test_model_size_participates_in_tts_cache_key(tmp_path):
+    """A bf16 podcast must never reuse 8bit audio cached for the same text."""
+    base = {
+        "name": "test",
+        "voice_profile": "profile-id",
+        "output_dir": str(tmp_path),
+    }
+    default = PodcastGenerator(base, tts_cache_dir=tmp_path / "cache")
+    bf16 = PodcastGenerator(
+        {**base, "voice_model_size": "1.7B-bf16"},
+        tts_cache_dir=tmp_path / "cache",
+    )
+
+    assert default._tts_cache_path("Hello.") != bf16._tts_cache_path("Hello.")

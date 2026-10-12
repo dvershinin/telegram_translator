@@ -16,6 +16,16 @@ CRON_INSTALLER = (
 )
 
 
+def test_cli_runs_in_project_virtualenv() -> None:
+    """System python3 lagged pyproject and failed every show on 2026-10-12."""
+    assert 'CLI="$TRANSLATOR_PYTHON -m telegram_translator.cli"' in SCRIPT
+    assert (
+        'TRANSLATOR_PYTHON="${TRANSLATOR_PYTHON:-'
+        '$HOME/.virtualenvs/telegram_translator/bin/python}"'
+    ) in SCRIPT
+    assert "python3 -m telegram_translator.cli" not in SCRIPT
+
+
 def test_vaske_daily_stays_disabled() -> None:
     """vaske_daily is off: it pushed the 04:00 run into the afternoon.
 

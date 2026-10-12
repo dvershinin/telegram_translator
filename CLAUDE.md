@@ -75,6 +75,7 @@ Daily cron (`crontab -l`) runs `scripts/daily_podcasts.sh` once at 04:00 local u
 - Scripts split at 500-char sentence boundaries, ~13 segments for a 6-min podcast
 - Total generation time: ~15 minutes for a full podcast on the 8bit model
 - Backend: `cd ~/Projects/voicebox && backend/venv/bin/uvicorn backend.main:app --port 17493`
+- Per-podcast `voice_model_size` (e.g. `"1.7B-bf16"`) is sent as Voicebox `model_size` and joins the TTS cache key. `1.7B-bf16` always loads full-precision Qwen regardless of the service's 8bit pin. `morning_brief` uses it since 2026-10-12: Daniel's listening A/B found 8bit audibly degraded `angiebunny27`, Russian most. Speaker-embedding cosine and WER were flat across the 8bit era, so they can't detect this kind of loss. Expect ~5.7 min per segment (tgp `stage_timeout_seconds: 7200`). Nightly shows stay on 8bit (bf16 pushed the 04:00 run into the afternoon, 2026-09-10..14); interleaving bf16 and 8bit requests forces a model reload per switch.
 - `voice_profile` accepts either a profile name or a profile UUID. `PodcastGenerator._get_profile_id` tries UUID match first, then case-insensitive name match — pin immutable UUIDs in config when the profile's name might change.
 
 ## Audio Assembly

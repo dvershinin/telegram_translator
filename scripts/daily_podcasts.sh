@@ -12,7 +12,11 @@ WORDPRESS_PASSWORD_FILE="$STATE_DIR/credentials/scalable-stories-wordpress-passw
 CONTENT_DB="${CONTENT_DB:-$STATE_DIR/databases/content_store.db}"
 SHLOCK_BIN="${SHLOCK_BIN:-/usr/bin/shlock}"
 MCP_DEV="${MCP_DEV:-/Users/danila/.virtualenvs/mcps/bin/mcp-dev}"
-CLI="python3 -m telegram_translator.cli"
+# The project virtualenv, not system python3: system site-packages lag
+# pyproject (anthropic 0.84 lacked `fallbacks`, failing every show on
+# 2026-10-12). tgp's morning brief already pins this interpreter.
+TRANSLATOR_PYTHON="${TRANSLATOR_PYTHON:-$HOME/.virtualenvs/telegram_translator/bin/python}"
+CLI="$TRANSLATOR_PYTHON -m telegram_translator.cli"
 VOICEBOX_URL="${VOICEBOX_URL:-http://localhost:17493}"
 LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/telegram_translator}"
 LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-60}"

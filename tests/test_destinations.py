@@ -271,6 +271,7 @@ class TestPodcastResolutionWithDestination:
                     "scalable_stories": {
                         "voice_profile": "profile-uuid",
                         "voice_instruct": "Speak naturally.",
+                        "voice_model_size": "1.7B-bf16",
                         "audio": {
                             "voice_target_lufs": -19,
                             "background_bed_start_after_intro": True,
@@ -284,6 +285,7 @@ class TestPodcastResolutionWithDestination:
         resolved = mgr.resolve_podcast_configs()["scalable_stories"]
 
         assert resolved["voice_instruct"] == "Speak naturally."
+        assert resolved["voice_model_size"] == "1.7B-bf16"
         assert resolved["audio"]["voice_target_lufs"] == -19.0
         assert resolved["audio"]["background_bed_start_after_intro"] is True
 
@@ -293,6 +295,7 @@ class TestPodcastResolutionWithDestination:
         resolved = mgr.resolve_podcast_configs()["plain"]
 
         assert resolved["voice_instruct"] is None
+        assert resolved["voice_model_size"] is None
         assert resolved["audio"]["voice_target_lufs"] is None
         assert resolved["audio"]["background_bed_start_after_intro"] is False
 

@@ -39,6 +39,8 @@ _NGINX_RE = re.compile(r"\bnginx\b", re.IGNORECASE)
 # HTTP statuses worth retrying on the per-segment Voicebox call: rate limit
 # plus the standard transient server-side family. A 4xx other than 429 is a
 # deterministic client error (bad text/profile) and is never retried.
+# Voicebox GenerationRequest.model_size values.
+VOICEBOX_MODEL_SIZES = frozenset({"1.7B", "1.7B-bf16", "0.6B"})
 _TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
@@ -362,7 +364,8 @@ class PodcastGenerator:
 
         Args:
             config: Resolved podcast config dict with keys: voicebox_url,
-                voice_profile, optional voice_instruct, language, output_dir,
+                voice_profile, optional voice_instruct, optional
+                voice_model_size, language, output_dir,
                 pause_between_segments_ms, audio (dict with asset paths and
                 mixing params), name.
             tts_cache_dir: Directory for TTS segment cache files.
@@ -380,6 +383,17 @@ class PodcastGenerator:
                 raise ValueError("voice_instruct must be at most 500 characters")
             voice_instruct = voice_instruct.strip()
         self.voice_instruct = voice_instruct
+        # Voicebox model size per request. The service pins 8bit for the
+        # nightly run's throughput; "1.7B-bf16" buys back voice quality
+        # (Russian especially) at ~5x render time. None = service default.
+        voice_model_size = config.get("voice_model_size")
+        if voice_model_size is not None and voice_model_size not in (
+            VOICEBOX_MODEL_SIZES
+        ):
+            raise ValueError(
+                f"voice_model_size must be one of {sorted(VOICEBOX_MODEL_SIZES)}"
+            )
+        self.voice_model_size = voice_model_size
         self.language = config.get("language", "en")
         self.output_dir = Path(config.get("output_dir", "./podcasts"))
         self.pause_ms = config.get("pause_between_segments_ms", 800)
@@ -764,6 +778,8 @@ class PodcastGenerator:
         payload = f"{text}:{self.voice_profile_name}"
         if self.voice_instruct:
             payload += f":instruct:{self.voice_instruct}"
+        if self.voice_model_size:
+            payload += f":model:{self.voice_model_size}"
         h = hashlib.sha256(payload.encode()).hexdigest()
         return self.tts_cache_dir / f"{h}.wav"
 
@@ -869,6 +885,8 @@ class PodcastGenerator:
         }
         if self.voice_instruct:
             payload["instruct"] = self.voice_instruct
+        if self.voice_model_size:
+            payload["model_size"] = self.voice_model_size
 
         # Bounded retry over TRANSIENT failures only (timeout, connection
         # drop, 5xx, 429) plus failed post-generation verification. A

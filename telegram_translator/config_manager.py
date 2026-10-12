@@ -493,6 +493,7 @@ class ConfigManager:
             "selection_prompt": cfg.get("selection_prompt", ""),
             "voice_profile": cfg.get("voice_profile", "default"),
             "voice_instruct": cfg.get("voice_instruct"),
+            "voice_model_size": cfg.get("voice_model_size"),
             "language": cfg.get("language", "en"),
             # Model/provider are NOT configured here. A podcast names an LLM
             # role; the role's model, base URL, and key resolve from the
