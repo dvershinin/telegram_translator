@@ -227,7 +227,7 @@ Verify credential loading without printing it or generating audio:
     'source /Users/danila/Projects/telegram_translator/scripts/daily_podcasts.sh; read_wordpress_password >/dev/null'
 ```
 
-End-to-end verification belongs to the next scheduled 04:00 run. Confirm the
+End-to-end verification belongs to the next scheduled 00:05 run. Confirm the
 dated durable log records Scalable Stories publication, its digest has
 `published_at` plus a local M4A, the WordPress episode/feed is live, and
 `daily-podcasts-success-date` advances after all shows succeed. Do not rerun

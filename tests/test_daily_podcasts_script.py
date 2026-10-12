@@ -460,7 +460,9 @@ def test_retry_skip_uses_publication_fact_and_local_artifact(
 def test_cron_is_night_only_and_cannot_truncate_active_log() -> None:
     """The installed source line runs once at night and only appends logs."""
     entry = CRON_ENTRY.read_text(encoding="utf-8").strip()
-    assert entry.startswith("0 4 * * * ")
+    # 00:05, not 04:00: on bf16 TTS (2026-10-12) the run takes ~7-8 h and
+    # must finish before the 08:30 morning brief. Still the same date.
+    assert entry.startswith("5 0 * * * ")
     # The fallback log must survive reboot: /tmp is wiped, which destroyed
     # the 2026-09-07 failure evidence.
     assert "/tmp/" not in entry
