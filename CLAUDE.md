@@ -136,7 +136,12 @@ word-compared with its script before it may be cached or assembled
 Voicebox ICL regression published a full episode of garbled non-speech while
 `/generate` returned success for every segment. Mismatch → regenerate within
 `segment_max_attempts`; persistent mismatch → the episode fails instead of
-publishing. **Fail-closed**: transcription being unavailable also blocks
+publishing. If the default STT (OpenAI's API via Voicebox) errors, the
+verifier retries the same WAV with `backend=mlx` (local Whisper). If both are
+down, the next attempt re-verifies that WAV without re-rendering it. Added
+2026-10-17, after OpenAI 401s on a bad network path failed the_stack and
+scalable_stories: each verification failure used to trigger a full bf16
+re-render (~5.7 min each). **Fail-closed**: transcription being unavailable also blocks
 publishing (the nightly alert fires; a news episode lapsing beats shipping
 garbage). Insertions count toward WER, so hallucinated rambling and lead-ins
 fail too. Knobs: `tts_verify` (default on), `tts_verify_max_wer` (default

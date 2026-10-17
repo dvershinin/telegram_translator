@@ -351,6 +351,10 @@ def _load_audio_asset(
     return _load_asset_wav(asset_path, target_rate=target_rate)
 
 
+class _TranscriptionUnavailableError(RuntimeError):
+    """No STT backend could transcribe a segment, so it cannot be verified."""
+
+
 class PodcastGenerator:
     """Generate podcast audio via Voicebox API."""
 
@@ -783,6 +787,59 @@ class PodcastGenerator:
         h = hashlib.sha256(payload.encode()).hexdigest()
         return self.tts_cache_dir / f"{h}.wav"
 
+    async def _transcribe(
+        self,
+        client: httpx.AsyncClient,
+        wav_path: Path,
+        language: str | None,
+    ) -> str:
+        """Transcribe a WAV through Voicebox, falling back to local MLX STT.
+
+        Voicebox's default STT backend is OpenAI's API. On 2026-10-17 that
+        API began rejecting the key mid-run (401, surfaced as a Voicebox 500)
+        and every remaining segment failed verification although the audio
+        was fine. The request-level ``backend=mlx`` override transcribes on
+        this Mac instead, so a remote STT outage no longer stops the run.
+
+        Args:
+            client: Open HTTP client for the Voicebox server.
+            wav_path: Audio to transcribe.
+            language: Whisper language hint, or None to auto-detect.
+
+        Returns:
+            The transcript text.
+
+        Raises:
+            _TranscriptionUnavailableError: If both the default and the local
+                backend fail.
+        """
+        form = {"language": language} if language else {}
+        attempts = (("default", form), ("local mlx", {**form, "backend": "mlx"}))
+        errors = []
+        for name, data in attempts:
+            try:
+                with open(wav_path, "rb") as audio_file:
+                    response = await client.post(
+                        f"{self.voicebox_url}/transcribe",
+                        files={
+                            "file": (wav_path.name, audio_file, "audio/wav"),
+                        },
+                        data=data,
+                    )
+                response.raise_for_status()
+                return response.json().get("text", "")
+            except (httpx.HTTPError, ValueError) as e:
+                errors.append(f"{name}: {type(e).__name__}: {e}")
+                logger.warning(
+                    "Transcription via %s STT failed for %s: %r",
+                    name,
+                    wav_path.name,
+                    e,
+                )
+        raise _TranscriptionUnavailableError(
+            f"transcription unavailable ({'; '.join(errors)})"
+        )
+
     async def _segment_verification_error(
         self,
         client: httpx.AsyncClient,
@@ -793,8 +850,8 @@ class PodcastGenerator:
 
         Transcribes the WAV through Voicebox ``/transcribe`` and compares
         the spoken words with the script text at word level. Fail-closed:
-        an unavailable or failing transcription counts as a verification
-        failure, because unverifiable audio must not be published.
+        audio that cannot be transcribed is never verified, because
+        unverifiable audio must not be published.
 
         Args:
             client: Open HTTP client for the Voicebox server.
@@ -804,26 +861,17 @@ class PodcastGenerator:
         Returns:
             None when the audio is verified, otherwise a human-readable
             description of the mismatch.
+
+        Raises:
+            _TranscriptionUnavailableError: If no STT backend could
+                transcribe the audio, so its quality is unknown.
         """
         reference = _normalize_spoken_tokens(text)
         if not reference:
             return None
 
         language = _verification_language(text, self.language)
-        form = {"language": language} if language else {}
-        try:
-            with open(wav_path, "rb") as audio_file:
-                response = await client.post(
-                    f"{self.voicebox_url}/transcribe",
-                    files={
-                        "file": (wav_path.name, audio_file, "audio/wav"),
-                    },
-                    data=form,
-                )
-            response.raise_for_status()
-            transcript = response.json().get("text", "")
-        except (httpx.HTTPError, ValueError) as e:
-            return f"transcription unavailable ({type(e).__name__}: {e})"
+        transcript = await self._transcribe(client, wav_path, language)
 
         hypothesis = _normalize_spoken_tokens(transcript)
         if not hypothesis:
@@ -840,6 +888,55 @@ class PodcastGenerator:
                 f"{transcript[:160]!r}"
             )
         return None
+
+    async def _render_segment(
+        self,
+        client: httpx.AsyncClient,
+        payload: dict,
+        output_path: Path,
+        label: str,
+        started: float,
+    ) -> None:
+        """Render one segment through Voicebox and save the WAV.
+
+        Args:
+            client: Open HTTP client for the Voicebox server.
+            payload: The ``/generate`` request body.
+            output_path: Where to save the WAV file.
+            label: Segment label for logs.
+            started: ``time.monotonic()`` when the segment began.
+
+        Raises:
+            httpx.HTTPError: If generation or the audio download fails.
+        """
+        response = await client.post(
+            f"{self.voicebox_url}/generate",
+            json=payload,
+        )
+        response.raise_for_status()
+        result = response.json()
+        generation_id = result["id"]
+        duration = result.get("duration", 0)
+        logger.info(
+            "Generation %s complete (%.1fs audio)",
+            generation_id,
+            duration,
+        )
+
+        audio_response = await client.get(
+            f"{self.voicebox_url}/audio/{generation_id}",
+        )
+        audio_response.raise_for_status()
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(audio_response.content)
+        logger.info(
+            "Saved audio for %s: %s (%d bytes, %.1fs wall)",
+            label,
+            output_path,
+            len(audio_response.content),
+            time.monotonic() - started,
+        )
 
     async def generate_segment(
         self,
@@ -893,61 +990,57 @@ class PodcastGenerator:
         # deterministic 4xx (bad text/profile) is not retried — retrying it
         # just wastes the budget and delays the fail.
         last_error: Exception | None = None
+        # Set when the audio was rendered but no STT backend could check it:
+        # the next attempt re-verifies the same WAV instead of re-rendering,
+        # since an STT outage says nothing about the audio.
+        audio_ready = False
         for attempt in range(1, self.segment_max_attempts + 1):
             try:
                 async with httpx.AsyncClient(timeout=900) as client:
-                    response = await client.post(
-                        f"{self.voicebox_url}/generate",
-                        json=payload,
-                    )
-                    response.raise_for_status()
-                    result = response.json()
-                    generation_id = result["id"]
-                    duration = result.get("duration", 0)
-                    logger.info(
-                        "Generation %s complete (%.1fs audio)",
-                        generation_id,
-                        duration,
-                    )
-
-                    audio_response = await client.get(
-                        f"{self.voicebox_url}/audio/{generation_id}",
-                    )
-                    audio_response.raise_for_status()
-
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                    output_path.write_bytes(audio_response.content)
-                    logger.info(
-                        "Saved audio for %s: %s (%d bytes, %.1fs wall)",
-                        label,
-                        output_path,
-                        len(audio_response.content),
-                        time.monotonic() - started,
-                    )
-
-                    mismatch = None
-                    if self.tts_verify:
-                        mismatch = await self._segment_verification_error(
-                            client, text, output_path
+                    if not audio_ready:
+                        await self._render_segment(
+                            client, payload, output_path, label, started
                         )
-                    if mismatch is None:
-                        # Only verified audio may enter the TTS cache —
-                        # cache hits skip verification on later runs.
-                        if cached:
-                            cached.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(output_path, cached)
+                    audio_ready = False
 
-                        return output_path
+                    try:
+                        mismatch = (
+                            await self._segment_verification_error(
+                                client, text, output_path
+                            )
+                            if self.tts_verify
+                            else None
+                        )
+                    except _TranscriptionUnavailableError as e:
+                        audio_ready = True
+                        last_error = e
+                        logger.warning(
+                            "Cannot verify %s (attempt %d/%d); keeping the "
+                            "audio and retrying verification only: %s",
+                            label,
+                            attempt,
+                            self.segment_max_attempts,
+                            e,
+                        )
+                    else:
+                        if mismatch is None:
+                            # Only verified audio may enter the TTS cache —
+                            # cache hits skip verification on later runs.
+                            if cached:
+                                cached.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(output_path, cached)
 
-                    last_error = RuntimeError(mismatch)
-                    logger.warning(
-                        "TTS verification failed for %s (attempt %d/%d); "
-                        "regenerating: %s",
-                        label,
-                        attempt,
-                        self.segment_max_attempts,
-                        mismatch,
-                    )
+                            return output_path
+
+                        last_error = RuntimeError(mismatch)
+                        logger.warning(
+                            "TTS verification failed for %s (attempt %d/%d); "
+                            "regenerating: %s",
+                            label,
+                            attempt,
+                            self.segment_max_attempts,
+                            mismatch,
+                        )
 
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code if e.response is not None else 0

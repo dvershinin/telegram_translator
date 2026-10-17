@@ -70,6 +70,7 @@ class _ScriptedClient:
         self.generation_calls = 0
         self.transcribe_calls = 0
         self.transcribe_languages = []
+        self.transcribe_backends = []
 
     async def __aenter__(self):
         return self
@@ -81,6 +82,7 @@ class _ScriptedClient:
         if files is not None:
             self.transcribe_calls += 1
             self.transcribe_languages.append((data or {}).get("language", "<omitted>"))
+            self.transcribe_backends.append((data or {}).get("backend", "default"))
             if not self._transcripts:
                 pytest.fail("unexpected extra transcribe call")
             item = self._transcripts.pop(0)
@@ -180,8 +182,9 @@ async def test_silent_audio_fails_verification(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_transcription_outage_fails_closed(monkeypatch, tmp_path):
+    """No STT backend at all: the segment fails and never enters the cache."""
     error = httpx.ConnectError("transcribe down")
-    client = _ScriptedClient([error, error, error])
+    client = _ScriptedClient([error] * 6)  # default + local mlx, 3 attempts
     _patch(monkeypatch, client)
     generator = _generator(tmp_path)
 
@@ -190,6 +193,43 @@ async def test_transcription_outage_fails_closed(monkeypatch, tmp_path):
 
     assert "transcription unavailable" in str(excinfo.value)
     assert not generator._tts_cache_path(TEXT).exists()
+    # An STT outage says nothing about the audio: it is rendered once.
+    assert client.generation_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_remote_stt_failure_falls_back_to_local_mlx(monkeypatch, tmp_path):
+    """2026-10-17: OpenAI STT 401 (Voicebox 500) must not fail the segment."""
+    request = httpx.Request("POST", "http://localhost:17493/transcribe")
+    remote_down = httpx.HTTPStatusError(
+        "500", request=request, response=httpx.Response(500, request=request)
+    )
+    client = _ScriptedClient([remote_down, TEXT])
+    _patch(monkeypatch, client)
+    generator = _generator(tmp_path)
+
+    out = await generator.generate_segment(TEXT, tmp_path / "seg.wav")
+
+    assert out.exists()
+    assert client.transcribe_backends == ["default", "mlx"]
+    assert client.transcribe_languages == ["en", "en"]
+    assert client.generation_calls == 1
+    assert generator._tts_cache_path(TEXT).exists()
+
+
+@pytest.mark.asyncio
+async def test_stt_recovery_reverifies_without_rerender(monkeypatch, tmp_path):
+    """A transient total STT outage retries verification on the same audio."""
+    error = httpx.ConnectError("transcribe down")
+    client = _ScriptedClient([error, error, TEXT])
+    _patch(monkeypatch, client)
+    generator = _generator(tmp_path)
+
+    out = await generator.generate_segment(TEXT, tmp_path / "seg.wav")
+
+    assert out.exists()
+    assert client.generation_calls == 1
+    assert generator._tts_cache_path(TEXT).exists()
 
 
 @pytest.mark.asyncio
