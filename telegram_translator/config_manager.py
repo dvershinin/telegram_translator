@@ -491,6 +491,7 @@ class ConfigManager:
             },
             "source_names": list(source_refs),
             "selection_prompt": cfg.get("selection_prompt", ""),
+            "selection_scoring": self._resolve_selection_scoring(name, cfg),
             "voice_profile": cfg.get("voice_profile", "default"),
             "voice_instruct": cfg.get("voice_instruct"),
             "voice_model_size": cfg.get("voice_model_size"),
@@ -545,6 +546,60 @@ class ConfigManager:
             "destination_type": destination_type,
             "slug": slug,
         }
+
+    @staticmethod
+    def _resolve_selection_scoring(
+        name: str, cfg: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Validate a podcast's optional ``selection_scoring`` block.
+
+        Args:
+            name: Podcast key name.
+            cfg: Raw podcast config dict from YAML.
+
+        Returns:
+            ``{"threshold": float, "max_stories": int}``, or None when the
+            podcast uses plain yes/no selection.
+
+        Raises:
+            ValueError: If the block is malformed or lacks a selection prompt.
+        """
+        raw = cfg.get("selection_scoring")
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            raise ValueError(f"Podcast '{name}' selection_scoring must be a mapping")
+        unknown = set(raw) - {"threshold", "max_stories"}
+        if unknown:
+            raise ValueError(
+                f"Podcast '{name}' selection_scoring has unknown keys: "
+                f"{', '.join(sorted(unknown))}"
+            )
+        if not cfg.get("selection_prompt"):
+            raise ValueError(
+                f"Podcast '{name}' selection_scoring requires a selection_prompt"
+            )
+        threshold = raw.get("threshold")
+        if (
+            isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
+            or not 0 <= threshold <= 10
+        ):
+            raise ValueError(
+                f"Podcast '{name}' selection_scoring.threshold must be a "
+                "number from 0 to 10"
+            )
+        max_stories = raw.get("max_stories")
+        if (
+            isinstance(max_stories, bool)
+            or not isinstance(max_stories, int)
+            or max_stories < 1
+        ):
+            raise ValueError(
+                f"Podcast '{name}' selection_scoring.max_stories must be an "
+                "integer of at least 1"
+            )
+        return {"threshold": float(threshold), "max_stories": max_stories}
 
     def _resolve_publish_section(
         self,

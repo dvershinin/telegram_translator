@@ -185,6 +185,12 @@ podcasts:
     host_name: "Angela"
     sources: [naebnet, lenta, cnn]          # references global source names
     selection_prompt: "Select articles about geopolitics, military, and economics"
+    # Optional: score items 0-10 instead of yes/no, keep those >= threshold,
+    # group the same story across sources, and keep the top max_stories.
+    # Omit to keep plain yes/no selection. Requires selection_prompt.
+    selection_scoring:
+      threshold: 6
+      max_stories: 10
     voice_profile: "angiebunny27"
     # Optional delivery direction forwarded to Voicebox. It participates in
     # the segment cache key, so changing it regenerates affected narration.

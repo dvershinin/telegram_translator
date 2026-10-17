@@ -43,6 +43,16 @@ Config lives in `config.yml` under `podcasts:` section. Legacy flat `digest:`+`p
 
 The `digests` table is keyed by `(date, podcast_name)`.
 
+### Scored selection (optional, per podcast)
+
+`selection_scoring: {threshold, max_stories}` replaces yes/no selection with the Horizon-style flow in `Summarizer.select_top_stories`:
+1. Each item is scored 0-10, one call per source (`scoring` cache stage). The `selection_prompt` sets what belongs; `_SCORING_RUBRIC` sets how much it matters.
+2. Items scoring below `threshold` are dropped.
+3. One cross-source call groups the survivors by real-world story (`stories` cache stage).
+4. Stories are ranked by best score, then distinct-source count, then article count, and the top `max_stories` are kept.
+
+Only items in kept stories go to the per-source summaries and `selected_item_ids`. The executive prompt gets a `STORY RANKING` block that uses the anonymized `Source N` labels. Malformed payloads raise; there is no silent fallback. The full per-item scores, story groups, and cuts go to `digests.selection_report` (JSON), which is where to tune thresholds. Script length is still set by the podcast prompt, so this changes *which* stories air, not TTS time. Podcasts without the block (e.g. `scalable_stories`) keep plain yes/no selection.
+
 ## Key Commands
 
 ```bash

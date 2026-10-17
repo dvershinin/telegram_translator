@@ -47,6 +47,7 @@ class Digest:
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     selected_item_ids: str = ""
+    selection_report: str = ""
     id: Optional[int] = None
 
 
@@ -225,6 +226,7 @@ class ContentStore:
             ("published_at", "TIMESTAMP"),
             ("selected_item_ids", "TEXT"),
             ("show_notes", "TEXT"),
+            ("selection_report", "TEXT"),
         ]
         for col_name, col_type in new_columns:
             if col_name not in columns:
@@ -584,7 +586,8 @@ class ContentStore:
                             show_notes = '', audio_path = '', m4a_path = '',
                             duration_seconds = 0, published_at = NULL,
                             status = 'summarized', error_message = '',
-                            completed_at = NULL, selected_item_ids = ''
+                            completed_at = NULL, selected_item_ids = '',
+                            selection_report = ''
                         WHERE date = ? AND podcast_name = ?
                         """,
                         (script, script, date, podcast_name),
@@ -909,4 +912,5 @@ class ContentStore:
             created_at=row["created_at"],
             completed_at=row["completed_at"],
             selected_item_ids=row["selected_item_ids"] or "",
+            selection_report=row["selection_report"] or "",
         )

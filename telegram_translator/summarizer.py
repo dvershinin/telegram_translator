@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
@@ -138,6 +140,174 @@ SHOW_NOTES_SCHEMA = {
     "required": ["lead", "topics"],
     "additionalProperties": False,
 }
+
+
+# Scored selection (opt-in per podcast via `selection_scoring`). Adapted from
+# Horizon's tech-news rubric: the podcast's selection_prompt says WHAT belongs,
+# this rubric says how much it matters, so a threshold and a story cap can pick
+# the strongest stories instead of passing every on-topic item through.
+_SCORING_RUBRIC = (
+    "Score every article from 0 to 10 for how much it deserves airtime in "
+    "today's episode:\n"
+    "- 9-10: Major developments: wars escalating or ending, landmark "
+    "agreements, breakthroughs, industry-changing announcements.\n"
+    "- 7-8: Important developments worth prompt attention, with concrete "
+    "facts and clear consequences.\n"
+    "- 5-6: Interesting but incremental or non-urgent.\n"
+    "- 3-4: Routine updates, shallow coverage, promotion-dominated.\n"
+    "- 0-2: Outside the selection criteria, noise, spam, or clickbait.\n"
+    "Judge the substance, not the headline: do not reward exaggerated "
+    "headlines or popularity alone. Articles may be in any language "
+    "(Russian, Ukrainian, English, etc.); score all of them by topic and "
+    "substance regardless of language. Score every numbered article "
+    "exactly once. Keep each reason under 12 words."
+)
+
+SCORING_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "The article's catalog number.",
+                    },
+                    "score": {
+                        "type": "integer",
+                        "description": "Airtime score from 0 to 10.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why, in under 12 words.",
+                    },
+                },
+                "required": ["n", "score", "reason"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+STORY_GROUPING_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "stories": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Short neutral name of the story.",
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Catalog numbers covering this story.",
+                    },
+                },
+                "required": ["label", "items"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["stories"],
+    "additionalProperties": False,
+}
+
+_STORY_GROUPING_SYSTEM = (
+    "You group news articles by the real-world story they cover. Articles "
+    "from different outlets, possibly in different languages, about the same "
+    "event or development belong to one story. Articles about merely related "
+    "topics (two separate events in the same war, two different AI model "
+    "releases) are different stories. Put every numbered article in exactly "
+    "one story; an article with no counterpart is a story of its own. Give "
+    "each story a short neutral label in English that names no outlet."
+)
+
+
+@dataclass
+class ScoredItem:
+    """A content item with its airtime score."""
+
+    item: ContentItem
+    score: int
+    reason: str = ""
+
+
+@dataclass
+class Story:
+    """Items from one or more sources that cover the same real-world story."""
+
+    label: str
+    members: list[ScoredItem] = field(default_factory=list)
+
+    @property
+    def score(self) -> int:
+        """Return the best member score."""
+        return max(member.score for member in self.members)
+
+    @property
+    def sources(self) -> list[str]:
+        """Return distinct source names in first-seen order."""
+        return list(dict.fromkeys(m.item.source_name for m in self.members))
+
+
+@dataclass
+class StorySelection:
+    """Outcome of scored selection: kept items, kept stories, and a report."""
+
+    items: list[ContentItem]
+    stories: list[Story]
+    report: dict
+
+
+def rank_stories(stories: list[Story], max_stories: int) -> list[Story]:
+    """Order stories by importance and keep the top ``max_stories``.
+
+    Best member score ranks first. Coverage by more distinct sources breaks
+    ties (corroboration), then the number of articles. The sort is stable, so
+    remaining ties keep the grouping order.
+
+    Args:
+        stories: Candidate stories; every story has at least one member.
+        max_stories: Maximum number of stories to keep.
+
+    Returns:
+        The kept stories, most important first.
+    """
+    ranked = sorted(
+        stories,
+        key=lambda story: (story.score, len(story.sources), len(story.members)),
+        reverse=True,
+    )
+    return ranked[:max_stories]
+
+
+def _parse_json_payload(payload: str, label: str) -> dict:
+    """Parse a structured-output payload, failing loudly on garbage."""
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label}: provider returned invalid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{label}: provider returned a non-object payload")
+    return parsed
+
+
+def _catalog(items: list[ContentItem], preview_chars: int) -> str:
+    """Render a 1-based numbered catalog of titles plus content previews."""
+    lines = []
+    for i, item in enumerate(items, 1):
+        title = item.title or "(no title)"
+        preview = item.content[:preview_chars].replace("\n", " ")
+        lines.append(f"{i}. {title} — {preview}")
+    return "\n".join(lines)
 
 
 class Summarizer:
@@ -524,12 +694,7 @@ class Summarizer:
         Returns:
             Filtered list of matching ContentItem objects.
         """
-        catalog_lines = []
-        for i, item in enumerate(items, 1):
-            title = item.title or "(no title)"
-            preview = item.content[:400].replace("\n", " ")
-            catalog_lines.append(f"{i}. {title} — {preview}")
-        catalog = "\n".join(catalog_lines)
+        catalog = _catalog(items, 400)
 
         system = (
             "You are a content curator. Given a selection criteria and a "
@@ -589,6 +754,243 @@ class Summarizer:
             source_name,
         )
         return selected
+
+    async def _cached_structured(
+        self,
+        stage: str,
+        system: str,
+        user: str,
+        schema_name: str,
+        schema: dict,
+        max_tokens: int,
+        extra: str = "",
+    ) -> dict:
+        """Run a cached structured call and return the parsed object.
+
+        Args:
+            stage: Cache stage name.
+            system: System prompt.
+            user: User message.
+            schema_name: Name for the schema/function.
+            schema: JSON Schema the response must satisfy.
+            max_tokens: Output-token ceiling.
+            extra: Optional extra cache-key component.
+
+        Returns:
+            The parsed JSON object.
+
+        Raises:
+            ValueError: If the payload is not a JSON object.
+        """
+        model = self.selection_model
+        cache_key = self._make_cache_key(stage, system, user, model, extra=extra)
+        if cache_key and self.store:
+            cached = self.store.get_llm_cache(cache_key)
+            if cached is not None:
+                logger.info("Cache hit for %s, skipping API call", stage)
+                return _parse_json_payload(cached, schema_name)
+
+        payload = await self._structured_chat(
+            system,
+            user,
+            schema_name,
+            schema,
+            max_tokens=max_tokens,
+            temperature=0.0,
+            model=model,
+        )
+        # Parse before caching so a malformed payload is never replayed.
+        parsed = _parse_json_payload(payload, schema_name)
+        if cache_key and self.store:
+            self.store.set_llm_cache(cache_key, stage, payload, model)
+        return parsed
+
+    async def score_content(
+        self,
+        items: list[ContentItem],
+        selection_prompt: str,
+    ) -> list[ScoredItem]:
+        """Score every item 0-10 for airtime, one call per source.
+
+        Per-source batching keeps small sources from being drowned out in a
+        large combined catalog, as in ``select_content``.
+
+        Args:
+            items: Collected content items.
+            selection_prompt: The podcast's inclusion criteria.
+
+        Returns:
+            One ScoredItem per input item, in input order. Items the model
+            did not score get 0.
+        """
+        by_source: dict[str, list[ContentItem]] = {}
+        for item in items:
+            by_source.setdefault(item.source_name, []).append(item)
+
+        system = f"Selection criteria: {selection_prompt}\n\n{_SCORING_RUBRIC}"
+        scored: dict[int, ScoredItem] = {}
+        for source_name, source_items in by_source.items():
+            user = f"Articles from {source_name}:\n{_catalog(source_items, 400)}"
+            logger.info(
+                "Scoring %s: %d candidates, model=%s",
+                source_name,
+                len(source_items),
+                self.selection_model,
+            )
+            parsed = await self._cached_structured(
+                "scoring",
+                system,
+                user,
+                "article_scores",
+                SCORING_SCHEMA,
+                max_tokens=8192,
+                extra=source_name,
+            )
+            results: dict[int, ScoredItem] = {}
+            for entry in parsed.get("items", []):
+                n = entry.get("n")
+                if not isinstance(n, int) or not 1 <= n <= len(source_items):
+                    continue
+                if n in results:
+                    continue
+                raw_score = entry.get("score")
+                score = raw_score if isinstance(raw_score, int) else 0
+                results[n] = ScoredItem(
+                    item=source_items[n - 1],
+                    score=min(max(score, 0), 10),
+                    reason=str(entry.get("reason", "")),
+                )
+            for n, item in enumerate(source_items, 1):
+                scored[id(item)] = results.get(n) or ScoredItem(
+                    item=item, score=0, reason="not scored"
+                )
+
+        return [scored[id(item)] for item in items]
+
+    async def group_stories(self, scored: list[ScoredItem]) -> list[Story]:
+        """Group scored items covering the same real-world story.
+
+        One call over all sources, so the same event reported by several
+        outlets collapses into one story.
+
+        Args:
+            scored: Items that passed the score threshold.
+
+        Returns:
+            Stories covering every input item exactly once. An item the model
+            did not place becomes its own story; an item placed twice stays in
+            the first story that claimed it.
+        """
+        if len(scored) <= 1:
+            return [
+                Story(label=member.item.title or "(no title)", members=[member])
+                for member in scored
+            ]
+
+        lines = []
+        for i, member in enumerate(scored, 1):
+            item = member.item
+            title = item.title or "(no title)"
+            preview = item.content[:300].replace("\n", " ")
+            lines.append(f"{i}. ({item.source_name}) {title} — {preview}")
+        user = "Articles:\n" + "\n".join(lines)
+
+        logger.info("Grouping %d scored articles into stories", len(scored))
+        parsed = await self._cached_structured(
+            "stories",
+            _STORY_GROUPING_SYSTEM,
+            user,
+            "story_groups",
+            STORY_GROUPING_SCHEMA,
+            max_tokens=8192,
+        )
+
+        placed: set[int] = set()
+        stories: list[Story] = []
+        for group in parsed.get("stories", []):
+            members = []
+            for n in group.get("items", []):
+                if isinstance(n, int) and 1 <= n <= len(scored) and n not in placed:
+                    placed.add(n)
+                    members.append(scored[n - 1])
+            if members:
+                label = str(group.get("label") or "").strip()
+                stories.append(
+                    Story(label=label or members[0].item.title or "", members=members)
+                )
+        for n, member in enumerate(scored, 1):
+            if n not in placed:
+                stories.append(
+                    Story(label=member.item.title or "(no title)", members=[member])
+                )
+        return stories
+
+    async def select_top_stories(
+        self,
+        items: list[ContentItem],
+        selection_prompt: str,
+        threshold: float,
+        max_stories: int,
+    ) -> StorySelection:
+        """Score, threshold, group across sources, rank, and cap.
+
+        Args:
+            items: Collected content items.
+            selection_prompt: The podcast's inclusion criteria.
+            threshold: Minimum score (inclusive) an item needs to survive.
+            max_stories: Maximum number of stories to keep.
+
+        Returns:
+            The kept items (in input order), the kept stories (most important
+            first), and a JSON-serializable report for tuning.
+        """
+        if not items:
+            return StorySelection(items=[], stories=[], report={})
+
+        scored = await self.score_content(items, selection_prompt)
+        passed = [member for member in scored if member.score >= threshold]
+        stories = await self.group_stories(passed)
+        kept = rank_stories(stories, max_stories)
+
+        kept_ids = {id(member.item) for story in kept for member in story.members}
+        kept_items = [item for item in items if id(item) in kept_ids]
+        kept_story_ids = {id(story) for story in kept}
+
+        logger.info(
+            "Scored selection: scored %d, passed %d, stories %d, kept %d "
+            "stories / %d items",
+            len(scored),
+            len(passed),
+            len(stories),
+            len(kept),
+            len(kept_items),
+        )
+
+        report = {
+            "threshold": threshold,
+            "max_stories": max_stories,
+            "items": [
+                {
+                    "id": member.item.id,
+                    "source": member.item.source_name,
+                    "title": member.item.title or "",
+                    "score": member.score,
+                    "reason": member.reason,
+                }
+                for member in scored
+            ],
+            "stories": [
+                {
+                    "label": story.label,
+                    "score": story.score,
+                    "sources": story.sources,
+                    "item_ids": [member.item.id for member in story.members],
+                    "kept": id(story) in kept_story_ids,
+                }
+                for story in rank_stories(stories, len(stories))
+            ],
+        }
+        return StorySelection(items=kept_items, stories=kept, report=report)
 
     async def summarize_source(
         self,
@@ -674,6 +1076,7 @@ class Summarizer:
         prompt: Optional[str] = None,
         source_biases: Optional[dict[str, str]] = None,
         prior_context: Optional[str] = None,
+        story_ranking: Optional[list[Story]] = None,
     ) -> str:
         """Generate a cross-source executive summary.
 
@@ -683,6 +1086,8 @@ class Summarizer:
             source_biases: Dict mapping source name to bias description.
             prior_context: Summary of recent prior episodes so the LLM
                 can focus on what is new rather than re-explaining.
+            story_ranking: Kept stories, most important first, from scored
+                selection. Rendered with the anonymized source labels.
 
         Returns:
             Executive summary text.
@@ -738,6 +1143,21 @@ class Summarizer:
         system = (prompt or self.executive_prompt) + bias_block + guardrail
 
         user = f"Here are the individual source summaries for today:\n\n{all_summaries}"
+
+        if story_ranking:
+            ranking_lines = []
+            for rank, story in enumerate(story_ranking, 1):
+                labels = [alias_for[s] for s in story.sources if s in alias_for]
+                covered = f"; covered by {', '.join(labels)}" if labels else ""
+                ranking_lines.append(
+                    f"{rank}. {story.label} (importance {story.score}/10{covered})"
+                )
+            user += (
+                "\n\n---\n\nSTORY RANKING (most important first). A story "
+                "covered by several sources is one event: merge those reports "
+                "into one item. Lead with higher-ranked stories.\n"
+                + "\n".join(ranking_lines)
+            )
 
         if prior_context:
             user += f"\n\n---\n\n{prior_context}"

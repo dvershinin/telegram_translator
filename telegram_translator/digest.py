@@ -313,7 +313,9 @@ class DigestPipeline:
                 # summarization so each podcast only sees relevant
                 # articles.
                 selection_prompt = pcfg.get("selection_prompt", "")
+                scoring = pcfg.get("selection_scoring")
                 filtered_items_by_source = None
+                story_ranking = None
                 if selection_prompt:
                     all_items = self.store.get_content_since(
                         since,
@@ -321,10 +323,24 @@ class DigestPipeline:
                         exclude_used=True,
                         exclude_podcast=podcast_name,
                     )
-                    all_items = await summarizer.select_content(
-                        all_items,
-                        selection_prompt,
-                    )
+                    selection_report = ""
+                    if scoring:
+                        selection = await summarizer.select_top_stories(
+                            all_items,
+                            selection_prompt,
+                            threshold=scoring["threshold"],
+                            max_stories=scoring["max_stories"],
+                        )
+                        all_items = selection.items
+                        story_ranking = selection.stories
+                        selection_report = json.dumps(
+                            selection.report, ensure_ascii=False
+                        )
+                    else:
+                        all_items = await summarizer.select_content(
+                            all_items,
+                            selection_prompt,
+                        )
                     # Track selected item IDs for publish-time marking
                     selected_ids = [
                         item.id for item in all_items if item.id is not None
@@ -333,6 +349,7 @@ class DigestPipeline:
                         date,
                         podcast_name,
                         selected_item_ids=json.dumps(selected_ids),
+                        selection_report=selection_report,
                     )
 
                     # Re-derive source_names from filtered items
@@ -417,6 +434,7 @@ class DigestPipeline:
                     pcfg.get("executive_prompt") or None,
                     source_biases=source_biases or None,
                     prior_context=prior_context,
+                    story_ranking=story_ranking,
                 )
 
                 show_notes = await summarizer.generate_show_notes(
